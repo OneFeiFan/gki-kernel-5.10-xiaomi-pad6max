@@ -1,0 +1,43 @@
+From ebf8ed4fcec8d893af2728c242ce539dc6e43128 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Mon, 26 Oct 2026 20:49:01 +0800
+Subject: [PATCH] block: blk-mq: set hctx before elevator limit_depth
+
+ADIOS limit_depth() reads data->hctx (to_word_depth), but stock 5.10 __blk_mq_alloc_request() calls limit_depth() before assigning data->ctx and data->hctx. Making ADIOS the default scheduler therefore dereferenced a NULL hctx on early boot I/O and rebooted at the first screen.
+
+Move the retry/hctx assignment ahead of the elevator block, matching the ESK 5.10 tree, and fold the !e check into else.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ block/blk-mq.c | 11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 96ede8fa0..75908b931 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -365,6 +365,10 @@ static struct request *__blk_mq_alloc_request(struct blk_mq_alloc_data *data)
+ 	if (data->cmd_flags & REQ_NOWAIT)
+ 		data->flags |= BLK_MQ_REQ_NOWAIT;
+ 
++retry:
++	data->ctx = blk_mq_get_ctx(q);
++	data->hctx = blk_mq_map_queue(q, data->cmd_flags, data->ctx);
++
+ 	if (e) {
+ 		/*
+ 		 * Flush requests are special and go directly to the
+@@ -375,12 +379,7 @@ static struct request *__blk_mq_alloc_request(struct blk_mq_alloc_data *data)
+ 		    e->type->ops.limit_depth &&
+ 		    !(data->flags & BLK_MQ_REQ_RESERVED))
+ 			e->type->ops.limit_depth(data->cmd_flags, data);
+-	}
+-
+-retry:
+-	data->ctx = blk_mq_get_ctx(q);
+-	data->hctx = blk_mq_map_queue(q, data->cmd_flags, data->ctx);
+-	if (!e)
++	} else
+ 		blk_mq_tag_busy(data->hctx);
+ 
+ 	/*

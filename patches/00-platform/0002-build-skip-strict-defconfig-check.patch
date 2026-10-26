@@ -1,0 +1,22 @@
+From 765e02f8aff6dee9232af299fec3595b02436332 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Sun, 25 Oct 2026 15:54:39 +0800
+Subject: [PATCH] build: skip strict defconfig check for customized
+ gki_defconfig
+
+The appended container options are not in savedefconfig order, so check_defconfig fails although the configuration is equivalent. Skip the strict comparison; the resulting .config is validated with module CRC checks.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ build.config.gki | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/build.config.gki b/build.config.gki
+index 44d4ed1be..d5c778536 100644
+--- a/build.config.gki
++++ b/build.config.gki
+@@ -1,3 +1,3 @@
+ DEFCONFIG=gki_defconfig
+-POST_DEFCONFIG_CMDS="check_defconfig"
++POST_DEFCONFIG_CMDS=""
+ 

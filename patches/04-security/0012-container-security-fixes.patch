@@ -1,0 +1,144 @@
+From e7b167847b4ce881a1bbcc5f01da44701d768531 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Mon, 26 Oct 2026 00:24:22 +0800
+Subject: [PATCH] phase10.3: backport container-relevant security fixes
+
+dcache: refuse a mountpoint on a dentry being removed. overlayfs: verify copy_file_range source with source-mounter creds (include fs/internal.h for 5.10). nfnetlink_log: move nf_log_unset to pre_exit. cpuset: cache v2 mode at bind time instead of reading the root flags later. Gates: 7298 baseline symbols unchanged, 355 vendor modules 0 failures, boot + le9uo sysctls + ntsync node.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ fs/dcache.c                   |  4 +++-
+ fs/overlayfs/file.c           | 20 +++++++++++++++++++-
+ kernel/cgroup/cpuset.c        |  6 +++++-
+ net/netfilter/nfnetlink_log.c | 13 +++++++++----
+ 4 files changed, 36 insertions(+), 7 deletions(-)
+
+diff --git a/fs/dcache.c b/fs/dcache.c
+index a1a40759d..842abaf89 100644
+--- a/fs/dcache.c
++++ b/fs/dcache.c
+@@ -1442,6 +1442,8 @@ EXPORT_SYMBOL(path_has_submounts);
+  *
+  * Only one of d_invalidate() and d_set_mounted() must succeed.  For
+  * this reason take rename_lock and d_lock on dentry and ancestors.
++ * Likewise for dont_mount() which marks a dentry that is being removed
++ * under d_lock.
+  */
+ int d_set_mounted(struct dentry *dentry)
+ {
+@@ -1458,7 +1460,7 @@ int d_set_mounted(struct dentry *dentry)
+ 		spin_unlock(&p->d_lock);
+ 	}
+ 	spin_lock(&dentry->d_lock);
+-	if (!d_unlinked(dentry)) {
++	if (!d_unlinked(dentry) && !cant_mount(dentry)) {
+ 		ret = -EBUSY;
+ 		if (!d_mountpoint(dentry)) {
+ 			dentry->d_flags |= DCACHE_MOUNTED;
+diff --git a/fs/overlayfs/file.c b/fs/overlayfs/file.c
+index 924444f31..4b530a462 100644
+--- a/fs/overlayfs/file.c
++++ b/fs/overlayfs/file.c
+@@ -14,6 +14,7 @@
+ #include <linux/mm.h>
+ #include <linux/fs.h>
+ #include "overlayfs.h"
++#include "../internal.h"
+ 
+ #define OVL_IOCB_MASK (IOCB_DSYNC | IOCB_HIPRI | IOCB_NOWAIT | IOCB_SYNC)
+ 
+@@ -672,6 +673,7 @@ static loff_t ovl_copyfile(struct file *file_in, loff_t pos_in,
+ 			    struct file *file_out, loff_t pos_out,
+ 			    loff_t len, unsigned int flags, enum ovl_copyop op)
+ {
++	struct inode *inode_in = file_inode(file_in);
+ 	struct inode *inode_out = file_inode(file_out);
+ 	struct fd real_in, real_out;
+ 	const struct cred *old_cred;
+@@ -696,7 +698,23 @@ static loff_t ovl_copyfile(struct file *file_in, loff_t pos_in,
+ 		goto out_unlock;
+ 	}
+ 
+-	old_cred = ovl_override_creds(file_inode(file_out)->i_sb);
++	/*
++	 * For cross-sb copy, vfs_copy_file_range() will verify read access with
++	 * the mounter creds of the dest fs mounter, so we need to explicitly
++	 * verify read access with the source mounter creds.
++	 */
++	if (unlikely(inode_in->i_sb != inode_out->i_sb)) {
++		old_cred = ovl_override_creds(inode_in->i_sb);
++		ret = rw_verify_area(READ, real_in.file, &pos_in, len);
++		revert_creds(old_cred);
++		if (unlikely(ret)) {
++			fdput(real_in);
++			fdput(real_out);
++			goto out_unlock;
++		}
++	}
++
++	old_cred = ovl_override_creds(inode_out->i_sb);
+ 	switch (op) {
+ 	case OVL_COPY:
+ 		ret = vfs_copy_file_range(real_in.file, pos_in,
+diff --git a/kernel/cgroup/cpuset.c b/kernel/cgroup/cpuset.c
+index f0f5dc3cb..61d253b98 100644
+--- a/kernel/cgroup/cpuset.c
++++ b/kernel/cgroup/cpuset.c
+@@ -413,10 +413,12 @@ static inline void check_insane_mems_config(nodemask_t *nodes)
+  * requested and won't be changed by hotplug events. Only the effective
+  * cpus or mems will be affected.
+  */
++static bool cpuset_v2_mode;
++
+ static inline bool is_in_v2_mode(void)
+ {
+ 	return cgroup_subsys_on_dfl(cpuset_cgrp_subsys) ||
+-	      (cpuset_cgrp_subsys.root->flags & CGRP_ROOT_CPUSET_V2_MODE);
++	      READ_ONCE(cpuset_v2_mode);
+ }
+ 
+ /*
+@@ -3023,6 +3025,8 @@ static void cpuset_bind(struct cgroup_subsys_state *root_css)
+ 	mutex_lock(&cpuset_mutex);
+ 	spin_lock_irq(&callback_lock);
+ 
++	WRITE_ONCE(cpuset_v2_mode,
++		   !!(cpuset_cgrp_subsys.root->flags & CGRP_ROOT_CPUSET_V2_MODE));
+ 	if (is_in_v2_mode()) {
+ 		cpumask_copy(top_cpuset.cpus_allowed, cpu_possible_mask);
+ 		top_cpuset.mems_allowed = node_possible_map;
+diff --git a/net/netfilter/nfnetlink_log.c b/net/netfilter/nfnetlink_log.c
+index d5c553d10..8d5b2ca0b 100644
+--- a/net/netfilter/nfnetlink_log.c
++++ b/net/netfilter/nfnetlink_log.c
+@@ -1124,21 +1124,26 @@ static int __net_init nfnl_log_net_init(struct net *net)
+ 	return 0;
+ }
+ 
+-static void __net_exit nfnl_log_net_exit(struct net *net)
++static void __net_exit nfnl_log_net_pre_exit(struct net *net)
+ {
+-	struct nfnl_log_net *log = nfnl_log_pernet(net);
+-	unsigned int i;
+-
+ #ifdef CONFIG_PROC_FS
+ 	remove_proc_entry("nfnetlink_log", net->nf.proc_netfilter);
+ #endif
+ 	nf_log_unset(net, &nfulnl_logger);
++}
++
++static void __net_exit nfnl_log_net_exit(struct net *net)
++{
++	struct nfnl_log_net *log = nfnl_log_pernet(net);
++	unsigned int i;
++
+ 	for (i = 0; i < INSTANCE_BUCKETS; i++)
+ 		WARN_ON_ONCE(!hlist_empty(&log->instance_table[i]));
+ }
+ 
+ static struct pernet_operations nfnl_log_net_ops = {
+ 	.init	= nfnl_log_net_init,
++	.pre_exit = nfnl_log_net_pre_exit,
+ 	.exit	= nfnl_log_net_exit,
+ 	.id	= &nfnl_log_net_id,
+ 	.size	= sizeof(struct nfnl_log_net),

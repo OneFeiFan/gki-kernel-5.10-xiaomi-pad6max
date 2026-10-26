@@ -1,0 +1,280 @@
+From ef0df4f226a92b0ce57a424ecd3bd2a4b03c002f Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Sun, 25 Oct 2026 18:44:29 +0800
+Subject: [PATCH] GKI: enable bridge netfilter and IPv6 NAT with ABI-safe netns
+
+Enable BRIDGE_NETFILTER, NF_CONNTRACK_BRIDGE, NF_TABLES_BRIDGE,
+NFT_BRIDGE_META, NFT_BRIDGE_REJECT, IP6_NF_NAT and
+IP6_NF_TARGET_MASQUERADE.
+
+BRIDGE_NETFILTER selects NETFILTER_FAMILY_BRIDGE, which normally adds
+hooks_bridge[5] to struct netns_nf (+40 bytes) and three net_device
+pointers to struct nf_queue_entry, changing the CRCs of the netfilter
+hook and routing symbols.
+
+Keep the stock layout and CRCs:
+
+- struct netns_nf: move hooks_bridge into a dynamically allocated
+  netns_nf_additional_info; store its pointer in the old
+  ANDROID_KABI_RESERVE(1) slot via a union.  Size stays 248, offset 240
+  unchanged, and genksyms still sees the stock reserve field.
+  netfilter_net_init/exit allocate/free it per net; all hook accesses go
+  through additional_info.
+- enum skb_ext_id: append SKB_EXT_BRIDGE_NF at the end instead of the
+  top so the existing ids keep their values; hide it from genksyms
+  (SKB_EXT_NUM stays 3 there).  struct skb_ext stays 8 bytes with the
+  current config.
+- struct nf_queue_entry: hide the three bridge pointers from genksyms;
+  the struct is internal to nf_queue.
+
+Ebtables (netns_xt +24 bytes) and BRIDGE_VLAN_FILTERING (needs
+VLAN_8021Q) are deferred.
+
+Validated on device: 7298/7298 symbol CRCs identical, 355/355 vendor
+modules match, kernel boots, bridge/nft bridge/IPv6 NAT symbols present,
+426 modules load.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ arch/arm64/configs/gki_defconfig | 10 ++++++++++
+ include/linux/netfilter.h        |  2 +-
+ include/linux/skbuff.h           | 11 ++++++++---
+ include/net/netfilter/nf_queue.h |  6 +++++-
+ include/net/netns/netfilter.h    | 25 ++++++++++++++++++++++---
+ net/bridge/br_input.c            |  2 +-
+ net/bridge/br_netfilter_hooks.c  |  2 +-
+ net/netfilter/core.c             | 26 +++++++++++++++++++++++---
+ net/netfilter/nf_queue.c         |  2 +-
+ 9 files changed, 72 insertions(+), 14 deletions(-)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index e7f29c05a..fe5a0743f 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -761,3 +761,13 @@ CONFIG_NFT_OBJREF=y
+ CONFIG_NFT_REJECT_INET=y
+ CONFIG_NFT_REJECT_IPV4=y
+ CONFIG_NFT_REJECT_IPV6=y
++# Phase 4: bridge netfilter + IPv6 NAT.  Ebtables and VLAN filtering are
++# deferred (ebtables needs 3 pointers in struct netns_xt; VLAN filtering
++# depends on VLAN_8021Q which arrives in phase 6).
++CONFIG_BRIDGE_NETFILTER=y
++CONFIG_NF_CONNTRACK_BRIDGE=y
++CONFIG_NF_TABLES_BRIDGE=y
++CONFIG_NFT_BRIDGE_META=y
++CONFIG_NFT_BRIDGE_REJECT=y
++CONFIG_IP6_NF_NAT=y
++CONFIG_IP6_NF_TARGET_MASQUERADE=y
+diff --git a/include/linux/netfilter.h b/include/linux/netfilter.h
+index 819aacebf..99ea09807 100644
+--- a/include/linux/netfilter.h
++++ b/include/linux/netfilter.h
+@@ -237,7 +237,7 @@ static inline int nf_hook(u_int8_t pf, unsigned int hook, struct net *net,
+ 		break;
+ 	case NFPROTO_BRIDGE:
+ #ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
+-		hook_head = rcu_dereference(net->nf.hooks_bridge[hook]);
++		hook_head = rcu_dereference(net->nf.additional_info->hooks_bridge[hook]);
+ #endif
+ 		break;
+ 	default:
+diff --git a/include/linux/skbuff.h b/include/linux/skbuff.h
+index 0bf4ceead..90851e3dc 100644
+--- a/include/linux/skbuff.h
++++ b/include/linux/skbuff.h
+@@ -4260,9 +4260,6 @@ static inline void skb_set_nfct(struct sk_buff *skb, unsigned long nfct)
+ 
+ #ifdef CONFIG_SKB_EXTENSIONS
+ enum skb_ext_id {
+-#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
+-	SKB_EXT_BRIDGE_NF,
+-#endif
+ #ifdef CONFIG_XFRM
+ 	SKB_EXT_SEC_PATH,
+ #endif
+@@ -4271,6 +4268,14 @@ enum skb_ext_id {
+ #endif
+ #if IS_ENABLED(CONFIG_MPTCP)
+ 	SKB_EXT_MPTCP,
++#endif
++#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER) && !defined(__GENKSYMS__)
++	/*
++	 * Appended instead of at the top so the existing extension ids keep
++	 * their values; genksyms does not see it, so SKB_EXT_NUM stays 3
++	 * there and struct skb_ext keeps its stock CRC.
++	 */
++	SKB_EXT_BRIDGE_NF,
+ #endif
+ 	SKB_EXT_NUM, /* must be last */
+ };
+diff --git a/include/net/netfilter/nf_queue.h b/include/net/netfilter/nf_queue.h
+index 779327e95..2ac48b42f 100644
+--- a/include/net/netfilter/nf_queue.h
++++ b/include/net/netfilter/nf_queue.h
+@@ -14,7 +14,11 @@ struct nf_queue_entry {
+ 	struct sk_buff		*skb;
+ 	unsigned int		id;
+ 	unsigned int		hook_index;	/* index in hook_entries->hook[] */
+-#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
++#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER) && !defined(__GENKSYMS__)
++	/*
++	 * Internal to nf_queue: keep it invisible to genksyms so the CRCs of
++	 * symbols whose types reach nf_queue_entry stay identical to stock.
++	 */
+ 	struct net_device	*bridge_dev;
+ 	struct net_device	*physin;
+ 	struct net_device	*physout;
+diff --git a/include/net/netns/netfilter.h b/include/net/netns/netfilter.h
+index 6ec6887ee..5fa5207d8 100644
+--- a/include/net/netns/netfilter.h
++++ b/include/net/netns/netfilter.h
+@@ -9,6 +9,16 @@ struct proc_dir_entry;
+ struct nf_logger;
+ struct nf_queue_handler;
+ 
++#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
++/*
++ * Bridge hooks live outside struct netns_nf so its layout (and the genksyms
++ * CRCs of the symbols reaching it) stays identical to the stock kernel.
++ */
++struct netns_nf_additional_info {
++	struct nf_hook_entries __rcu *hooks_bridge[NF_INET_NUMHOOKS];
++};
++#endif
++
+ struct netns_nf {
+ #if defined CONFIG_PROC_FS
+ 	struct proc_dir_entry *proc_netfilter;
+@@ -23,9 +33,6 @@ struct netns_nf {
+ #ifdef CONFIG_NETFILTER_FAMILY_ARP
+ 	struct nf_hook_entries __rcu *hooks_arp[NF_ARP_NUMHOOKS];
+ #endif
+-#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
+-	struct nf_hook_entries __rcu *hooks_bridge[NF_INET_NUMHOOKS];
+-#endif
+ #if IS_ENABLED(CONFIG_NF_DEFRAG_IPV4)
+ 	bool			defrag_ipv4;
+ #endif
+@@ -33,6 +40,18 @@ struct netns_nf {
+ 	bool			defrag_ipv6;
+ #endif
+ 
++#if defined(CONFIG_NETFILTER_FAMILY_BRIDGE) && !defined(__GENKSYMS__)
++	/*
++	 * Reuse the old KABI reserve slot for a pointer to the per-net bridge
++	 * hook array.  Size (248) and offset (240) stay unchanged; genksyms
++	 * still sees the stock reserve field.
++	 */
++	union {
++		struct netns_nf_additional_info *additional_info;
++		ANDROID_KABI_RESERVE(1);
++	};
++#else
+ 	ANDROID_KABI_RESERVE(1);
++#endif
+ };
+ #endif
+diff --git a/net/bridge/br_input.c b/net/bridge/br_input.c
+index 10819e35f..7482ef331 100644
+--- a/net/bridge/br_input.c
++++ b/net/bridge/br_input.c
+@@ -223,7 +223,7 @@ static int nf_hook_bridge_pre(struct sk_buff *skb, struct sk_buff **pskb)
+ 		goto frame_finish;
+ #endif
+ 
+-	e = rcu_dereference(net->nf.hooks_bridge[NF_BR_PRE_ROUTING]);
++	e = rcu_dereference(net->nf.additional_info->hooks_bridge[NF_BR_PRE_ROUTING]);
+ 	if (!e)
+ 		goto frame_finish;
+ 
+diff --git a/net/bridge/br_netfilter_hooks.c b/net/bridge/br_netfilter_hooks.c
+index 4f867aca6..8576fde64 100644
+--- a/net/bridge/br_netfilter_hooks.c
++++ b/net/bridge/br_netfilter_hooks.c
+@@ -1020,7 +1020,7 @@ int br_nf_hook_thresh(unsigned int hook, struct net *net,
+ 	unsigned int i;
+ 	int ret;
+ 
+-	e = rcu_dereference(net->nf.hooks_bridge[hook]);
++	e = rcu_dereference(net->nf.additional_info->hooks_bridge[hook]);
+ 	if (!e)
+ 		return okfn(net, sk, skb);
+ 
+diff --git a/net/netfilter/core.c b/net/netfilter/core.c
+index d0c7c396b..ddc98e895 100644
+--- a/net/netfilter/core.c
++++ b/net/netfilter/core.c
+@@ -278,9 +278,9 @@ nf_hook_entry_head(struct net *net, int pf, unsigned int hooknum,
+ #endif
+ #ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
+ 	case NFPROTO_BRIDGE:
+-		if (WARN_ON_ONCE(ARRAY_SIZE(net->nf.hooks_bridge) <= hooknum))
++		if (WARN_ON_ONCE(ARRAY_SIZE(net->nf.additional_info->hooks_bridge) <= hooknum))
+ 			return NULL;
+-		return net->nf.hooks_bridge + hooknum;
++		return net->nf.additional_info->hooks_bridge + hooknum;
+ #endif
+ #ifdef CONFIG_NETFILTER_INGRESS
+ 	case NFPROTO_INET:
+@@ -710,13 +710,25 @@ __netfilter_net_init(struct nf_hook_entries __rcu **e, int max)
+ 
+ static int __net_init netfilter_net_init(struct net *net)
+ {
++#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
++	/* Keep struct netns_nf layout stock-compatible. */
++	BUILD_BUG_ON(offsetof(struct netns_nf, additional_info) != 240);
++	BUILD_BUG_ON(sizeof(struct netns_nf) != 248);
++
++	net->nf.additional_info = kzalloc(sizeof(*net->nf.additional_info),
++					  GFP_KERNEL);
++	if (!net->nf.additional_info)
++		return -ENOMEM;
++#endif
++
+ 	__netfilter_net_init(net->nf.hooks_ipv4, ARRAY_SIZE(net->nf.hooks_ipv4));
+ 	__netfilter_net_init(net->nf.hooks_ipv6, ARRAY_SIZE(net->nf.hooks_ipv6));
+ #ifdef CONFIG_NETFILTER_FAMILY_ARP
+ 	__netfilter_net_init(net->nf.hooks_arp, ARRAY_SIZE(net->nf.hooks_arp));
+ #endif
+ #ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
+-	__netfilter_net_init(net->nf.hooks_bridge, ARRAY_SIZE(net->nf.hooks_bridge));
++	__netfilter_net_init(net->nf.additional_info->hooks_bridge,
++			     ARRAY_SIZE(net->nf.additional_info->hooks_bridge));
+ #endif
+ #ifdef CONFIG_PROC_FS
+ 	net->nf.proc_netfilter = proc_net_mkdir(net, "netfilter",
+@@ -725,6 +737,10 @@ static int __net_init netfilter_net_init(struct net *net)
+ 		if (!net_eq(net, &init_net))
+ 			pr_err("cannot create netfilter proc entry");
+ 
++#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
++		kfree(net->nf.additional_info);
++		net->nf.additional_info = NULL;
++#endif
+ 		return -ENOMEM;
+ 	}
+ #endif
+@@ -734,6 +750,10 @@ static int __net_init netfilter_net_init(struct net *net)
+ 
+ static void __net_exit netfilter_net_exit(struct net *net)
+ {
++#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
++	kfree(net->nf.additional_info);
++	net->nf.additional_info = NULL;
++#endif
+ 	remove_proc_entry("netfilter", net->proc_net);
+ }
+ 
+diff --git a/net/netfilter/nf_queue.c b/net/netfilter/nf_queue.c
+index 0fa3d9d54..adc297164 100644
+--- a/net/netfilter/nf_queue.c
++++ b/net/netfilter/nf_queue.c
+@@ -298,7 +298,7 @@ static struct nf_hook_entries *nf_hook_entries_head(const struct net *net, u8 pf
+ 	switch (pf) {
+ #ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
+ 	case NFPROTO_BRIDGE:
+-		return rcu_dereference(net->nf.hooks_bridge[hooknum]);
++		return rcu_dereference(net->nf.additional_info->hooks_bridge[hooknum]);
+ #endif
+ 	case NFPROTO_IPV4:
+ 		return rcu_dereference(net->nf.hooks_ipv4[hooknum]);

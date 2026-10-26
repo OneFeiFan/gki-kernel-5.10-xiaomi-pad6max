@@ -1,0 +1,75 @@
+From cffd11567f10ab1be1fbad4e4cc26ea38536b70c Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Mon, 26 Oct 2026 22:13:05 +0800
+Subject: [PATCH] docs: update for phase 10.12 epoll_pwait2
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ README.gki-docker.md | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/README.gki-docker.md b/README.gki-docker.md
+index de292923b..8045cc0a9 100644
+--- a/README.gki-docker.md
++++ b/README.gki-docker.md
+@@ -4,9 +4,9 @@
+ Docker 所需的内核特性，同时保持 vendor_boot 中 355 个厂商模块的 KMI/CRC 兼容。
+ 
+ - 分支：`gki-docker-phase2`（本地，未推送）
+-- 设备实测内核：`5.10.272-android12-9-gc24fa6176535-dirty`（含 futex_waitv；KernelSU LKM 正常）
+-- 最终镜像：`work/boot_272_futex.img`（PC 侧 `C:\Users\OneFeiFan\boot_272_futex.img`）
+-- 回退镜像：`C:\Users\OneFeiFan\boot_backup_pre_futex.img`（ADIOS 默认版，无 futex_waitv）
++- 设备实测内核：`5.10.272-android12-9-geba364b9a173-dirty`（含 futex_waitv、epoll_pwait2；KernelSU LKM 正常）
++- 最终镜像：`work/boot_272_epoll.img`（PC 侧 `C:\Users\OneFeiFan\boot_272_epoll.img`）
++- 回退镜像：`C:\Users\OneFeiFan\boot_backup_pre_epoll.img`（含 futex_waitv，无 epoll_pwait2）
+ 
+ ## 提交列表
+ 
+@@ -31,11 +31,13 @@ Docker 所需的内核特性，同时保持 vendor_boot 中 355 个厂商模块
+ | `ebf8ed4fc` | blk-mq 在 `limit_depth` 前设置 hctx（ADIOS 默认崩溃根因修复） |
+ | `720aeb68a` | ADIOS 设为内核默认调度器（依赖上一行修复） |
+ | `e970ecb92` | futex_waitv 系统调用回移（Wine/Proton） |
++| `78b90ee4a` | epoll_pwait2 系统调用回移（纳秒超时） |
+ 
+ ## 已启用功能
+ 
+ - NTSync：`/dev/ntsync`（KernelSU 模块 `ntsync` 开机创建，`/proc/misc` 127），Wine 10.15+/Proton
+ - futex_waitv：系统调用 449（Wine/Proton 多对象等待）；仅 64 位 ABI，32 位调用仍返回 ENOSYS
++- epoll_pwait2：系统调用 441，纳秒级超时；64 位与 32 位 compat 都已接
+ - le9uo：`vm.workingset_protection=1`，`anon_min_ratio=15`、`clean_min_ratio=15`
+ - zram：内核内建（`ZRAM=y`/`ZSMALLOC=y`），默认 `lz4kd`；算法列表含 `lz4hc lz4k lz4k_oplus lz4kd`，带 `lz4armv8` NEON
+ - 安全：dcache、overlayfs、nfnetlink_log、cpuset 四个容器相关补丁
+@@ -87,6 +89,7 @@ genksyms 可见的文本里，就可能带偏整片符号的 CRC。所有新增
+ - **10.9 ADIOS 默认崩溃根因修复**（`ebf8ed4fc`）：`adios_limit_depth()` 经 `to_word_depth()` 读 `data->hctx->sched_tags->bitmap_tags`，而原生 5.10 的 `__blk_mq_alloc_request()` 是先调 `limit_depth()`、后给 `data->ctx/data->hctx` 赋值，所以设成默认后开机首轮 I/O 就空指针，卡第一屏。ESK 的 `block/blk-mq.c` 把 `retry:` 与 hctx 赋值整体提前，并把 `if (!e)` 改成 `else`；本版照搬这 27 行改动。修复后实测：开机正常，`sda` 可切 `[adios]`，1GB 写入 782MB/s，无 Oops；随后在 10.10 设为默认并复测通过。
+ - **10.10 ADIOS 设为默认**（`720aeb68a`）：`MQ_ADIOS_DEFAULT=y`，`elevator_init_mq()` 优先取 `adios`，失败再回退原有默认。实测开机正常、1GB 写入 813MB/s、无 Oops。发现 vendor 的 `/vendor/etc/init/hw/init.qti.kernel.rc` 会在开机后把 sda–sdh/mmcblk 写成 bfq（`persist.sys.stability.smartfocusio=on` 时 sda 写 cpq），因此磁盘实际仍是 cpq/bfq，只有未被覆盖的 loop45、mtdblock0 等队列保持 `[adios]`。要让磁盘真正用上 ADIOS，需要额外的开机后脚本覆盖 vendor 设置。
+ - **10.11 futex_waitv**（`e970ecb92`）：照上游 5.16 接口回移，系统调用号 449；5.10 没有 `futex_init_timeout()`，绝对超时的换算直接写在 syscall 里。android12-5.10 已经把 futex 拆到 `kernel/futex/core.c`，所以代码直接接在 `get_robust_list` 之后。实测：`nr=0`→EINVAL、值不匹配→EAGAIN、值匹配但超时已过→ETIMEDOUT。仅接 64 位 ABI。
++- **10.12 epoll_pwait2**（`78b90ee4a`）：5.11 接口，系统调用号 441；先把 epoll 内部超时改成 `timespec64`，再加 syscall。64 位 arm64 和 32 位 compat 都已接。实测：零超时返回 0、非法 `tv_nsec` 返回 EINVAL、1ms 超时正常到期、`maxevents=0` 返回 EINVAL；futex_waitv 回归测试仍通过。
+ 
+ ## 构建与校验
+ 
+@@ -112,14 +115,14 @@ OUT_DIR=~/kernel-sources/out-p2 bash build/build.sh -j12
+ 
+ ```sh
+ adb reboot bootloader
+-fastboot flash boot_a boot_272_futex.img
++fastboot flash boot_a boot_272_epoll.img
+ fastboot reboot
+ ```
+ 
+-刷前确认 `boot_backup_pre_futex.img` 存在（192MB）。回退：
++刷前确认 `boot_backup_pre_epoll.img` 存在（192MB）。回退：
+ 
+ ```sh
+-fastboot flash boot_a boot_backup_pre_futex.img
++fastboot flash boot_a boot_backup_pre_epoll.img
+ ```
+ 
+ 注意：`uname` 里的时间是 HEAD 提交时间（KBUILD_BUILD_TIMESTAMP），同一提交下
+@@ -145,6 +148,7 @@ NO_COLOR=1 sh ~/docker-check-plain.sh ~/config-final
+ cat /proc/misc | grep ntsync
+ head -c 0 /dev/ntsync && echo ntsync_ok
+ grep __arm64_sys_futex_waitv /proc/kallsyms     # futex_waitv 已接入
++grep __arm64_sys_epoll_pwait2 /proc/kallsyms    # epoll_pwait2 已接入
+ cat /sys/block/zram0/comp_algorithm      # 期望行尾 [lz4kd]
+ cat /sys/block/zram0/disksize            # 17179869184
+ cat /proc/sys/vm/workingset_protection /proc/sys/vm/anon_min_ratio /proc/sys/vm/clean_min_ratio
