@@ -30,3 +30,4 @@
 09-docs/0030-docs-phase10.10-adios-default.patch
 09-docs/0031-docs-phase10.11-futex-waitv.patch
 09-docs/0032-docs-phase10.12-epoll-pwait2.patch
+09-docs/0033-docs-rewrite-main-readme.patch

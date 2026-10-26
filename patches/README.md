@@ -7,7 +7,7 @@
 - AOSP `android12-5.10-lts`，5.10.272 合并提交：`a1eed2e9c`
   （`Merge 5.10.272 into android12-5.10-lts`）
 - 应用本目录的 `series` 后，应得到当前仓库的内核源码树；
-  实测 tree 哈希为 `65226488ec40d50478e95a449d8f586ac8cebec4`
+  实测 tree 哈希为 `81e6475b7e7d4b8a6282a20202130e855a551d94`
   （不含 `patches/` 目录本身）。
 
 ## 应用方法
@@ -79,12 +79,13 @@ while read p; do git apply "patches/$p"; done < patches/series
 | `09-docs/0030-docs-phase10.10-adios-default.patch` | `c24fa6176` | docs: update for phase 10.10 ADIOS default |
 | `09-docs/0031-docs-phase10.11-futex-waitv.patch` | `eba364b9a` | docs: update for phase 10.11 futex_waitv |
 | `09-docs/0032-docs-phase10.12-epoll-pwait2.patch` | `cffd11567` | docs: update for phase 10.12 epoll_pwait2 |
+| `09-docs/0033-docs-rewrite-main-readme.patch` | `79c391595` | docs: rewrite main README |
 
 ## 验证
 
 - 每个补丁保留原提交的作者和提交信息，`git am` 会重建对应提交。
-- 应用完 `series` 后，内核源码树应与本仓库提交 `patches/` 之前的 `HEAD` 一致，
-  即 tree `65226488ec40d50478e95a449d8f586ac8cebec4`
+- 应用完 `series` 后，内核源码树（不含 `patches/` 目录）应与提交 `79c391595`
+  的 tree 一致：`81e6475b7e7d4b8a6282a20202130e855a551d94`
   （`09-docs` 只改 README；`patches/` 目录本身不在补丁里）。
 - 本项目的硬门禁：7298 个基线导出符号 CRC 差异为 0；355 个 vendor_boot
   模块 0 失败。详见 `README.gki-docker.md`。
