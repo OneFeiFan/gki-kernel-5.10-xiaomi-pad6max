@@ -25,7 +25,13 @@ enum nf_ct_ext_id {
 #ifdef CONFIG_NF_CONNTRACK_LABELS
 	NF_CT_EXT_LABELS,
 #endif
-#if IS_ENABLED(CONFIG_NETFILTER_SYNPROXY)
+/*
+ * The extra enum value shifts NF_CT_EXT_NUM (5 -> 6), which genksyms folds
+ * into the CRCs of symbols whose types reach struct nf_ct_ext.  Hide it from
+ * genksyms so those CRCs stay identical to a kernel without SYNPROXY; the
+ * runtime-only growth of struct nf_ct_ext is internal to conntrack.
+ */
+#if IS_ENABLED(CONFIG_NETFILTER_SYNPROXY) && !defined(__GENKSYMS__)
 	NF_CT_EXT_SYNPROXY,
 #endif
 	NF_CT_EXT_NUM,

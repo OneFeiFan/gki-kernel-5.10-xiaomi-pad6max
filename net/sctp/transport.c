@@ -55,7 +55,7 @@ static struct sctp_transport *sctp_transport_init(struct net *net,
 	 * given destination transport address, set RTO to the protocol
 	 * parameter 'RTO.Initial'.
 	 */
-	peer->rto = msecs_to_jiffies(net->sctp.rto_initial);
+	peer->rto = msecs_to_jiffies(net_sctp(net).rto_initial);
 
 	peer->last_time_heard = 0;
 	peer->last_time_ecne_reduced = jiffies;
@@ -65,8 +65,8 @@ static struct sctp_transport *sctp_transport_init(struct net *net,
 			    SPP_SACKDELAY_ENABLE;
 
 	/* Initialize the default path max_retrans.  */
-	peer->pathmaxrxt  = net->sctp.max_retrans_path;
-	peer->pf_retrans  = net->sctp.pf_retrans;
+	peer->pathmaxrxt  = net_sctp(net).max_retrans_path;
+	peer->pf_retrans  = net_sctp(net).pf_retrans;
 
 	INIT_LIST_HEAD(&peer->transmitted);
 	INIT_LIST_HEAD(&peer->send_ready);
@@ -349,11 +349,11 @@ void sctp_transport_update_rto(struct sctp_transport *tp, __u32 rtt)
 		 * For example, assuming the default value of RTO.Alpha of
 		 * 1/8, rto_alpha would be expressed as 3.
 		 */
-		rto_beta = READ_ONCE(net->sctp.rto_beta);
+		rto_beta = READ_ONCE(net_sctp(net).rto_beta);
 		if (rto_beta < 32)
 			tp->rttvar = tp->rttvar - (tp->rttvar >> rto_beta)
 				+ (((__u32)abs((__s64)tp->srtt - (__s64)rtt)) >> rto_beta);
-		rto_alpha = READ_ONCE(net->sctp.rto_alpha);
+		rto_alpha = READ_ONCE(net_sctp(net).rto_alpha);
 		if (rto_alpha < 32)
 			tp->srtt = tp->srtt - (tp->srtt >> rto_alpha)
 				+ (rtt >> rto_alpha);

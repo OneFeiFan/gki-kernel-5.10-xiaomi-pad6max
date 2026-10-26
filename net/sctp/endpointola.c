@@ -49,8 +49,8 @@ static struct sctp_endpoint *sctp_endpoint_init(struct sctp_endpoint *ep,
 	if (!ep->digest)
 		return NULL;
 
-	ep->asconf_enable = net->sctp.addip_enable;
-	ep->auth_enable = net->sctp.auth_enable;
+	ep->asconf_enable = net_sctp(net).addip_enable;
+	ep->auth_enable = net_sctp(net).auth_enable;
 	if (ep->auth_enable) {
 		if (sctp_auth_init(ep, gfp))
 			goto nomem;
@@ -81,14 +81,14 @@ static struct sctp_endpoint *sctp_endpoint_init(struct sctp_endpoint *ep,
 	INIT_LIST_HEAD(&ep->asocs);
 
 	/* Use SCTP specific send buffer space queues.  */
-	ep->sndbuf_policy = net->sctp.sndbuf_policy;
+	ep->sndbuf_policy = net_sctp(net).sndbuf_policy;
 
 	sk->sk_data_ready = sctp_data_ready;
 	sk->sk_write_space = sctp_write_space;
 	sock_set_flag(sk, SOCK_USE_WRITE_QUEUE);
 
 	/* Get the receive buffer policy for this endpoint */
-	ep->rcvbuf_policy = net->sctp.rcvbuf_policy;
+	ep->rcvbuf_policy = net_sctp(net).rcvbuf_policy;
 
 	/* Initialize the secret key used with cookie. */
 	get_random_bytes(ep->secret_key, sizeof(ep->secret_key));
@@ -104,9 +104,9 @@ static struct sctp_endpoint *sctp_endpoint_init(struct sctp_endpoint *ep,
 	/* Add the null key to the endpoint shared keys list and
 	 * set the hmcas and chunks pointers.
 	 */
-	ep->prsctp_enable = net->sctp.prsctp_enable;
-	ep->reconf_enable = net->sctp.reconf_enable;
-	ep->ecn_enable = net->sctp.ecn_enable;
+	ep->prsctp_enable = net_sctp(net).prsctp_enable;
+	ep->reconf_enable = net_sctp(net).reconf_enable;
+	ep->ecn_enable = net_sctp(net).ecn_enable;
 
 	/* Remember who we are attached to.  */
 	ep->base.sk = sk;

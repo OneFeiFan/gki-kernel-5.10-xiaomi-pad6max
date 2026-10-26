@@ -67,6 +67,7 @@ COND_SYSCALL(eventfd2);
 COND_SYSCALL(epoll_create1);
 COND_SYSCALL(epoll_ctl);
 COND_SYSCALL(epoll_pwait);
+COND_SYSCALL(epoll_pwait2);
 COND_SYSCALL_COMPAT(epoll_pwait);
 
 /* fs/fcntl.c */
@@ -147,6 +148,7 @@ COND_SYSCALL(set_robust_list);
 COND_SYSCALL_COMPAT(set_robust_list);
 COND_SYSCALL(get_robust_list);
 COND_SYSCALL_COMPAT(get_robust_list);
+COND_SYSCALL(futex_waitv);
 
 /* kernel/hrtimer.c */
 

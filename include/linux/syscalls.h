@@ -58,6 +58,7 @@ struct mq_attr;
 struct compat_stat;
 struct old_timeval32;
 struct robust_list_head;
+struct futex_waitv;
 struct getcpu_cache;
 struct old_linux_dirent;
 struct perf_event_attr;
@@ -236,6 +237,10 @@ static inline int is_syscall_trace_event(struct trace_event_call *tp_event)
 	__diag_push();							\
 	__diag_ignore(GCC, 8, "-Wattribute-alias",			\
 		      "Type aliasing is used to sanitize syscall arguments");\
+	__diag_ignore(clang, 23, "-Wunknown-warning-option",		\
+		      "Avoid breaking versions without -Wattribute-alias");\
+	__diag_ignore(clang, 23, "-Wattribute-alias",			\
+		      "Type aliasing is used to sanitize syscall arguments");\
 	asmlinkage long sys##name(__MAP(x,__SC_DECL,__VA_ARGS__))	\
 		__attribute__((alias(__stringify(__se_sys##name))));	\
 	ALLOW_ERROR_INJECTION(sys##name, ERRNO);			\
@@ -385,6 +390,11 @@ asmlinkage long sys_epoll_ctl(int epfd, int op, int fd,
 				struct epoll_event __user *event);
 asmlinkage long sys_epoll_pwait(int epfd, struct epoll_event __user *events,
 				int maxevents, int timeout,
+				const sigset_t __user *sigmask,
+				size_t sigsetsize);
+asmlinkage long sys_epoll_pwait2(int epfd, struct epoll_event __user *events,
+				int maxevents,
+				const struct __kernel_timespec __user *timeout,
 				const sigset_t __user *sigmask,
 				size_t sigsetsize);
 
@@ -613,6 +623,10 @@ asmlinkage long sys_get_robust_list(int pid,
 				    size_t __user *len_ptr);
 asmlinkage long sys_set_robust_list(struct robust_list_head __user *head,
 				    size_t len);
+asmlinkage long sys_futex_waitv(struct futex_waitv __user *waiters,
+				unsigned int nr_futexes, unsigned int flags,
+				struct __kernel_timespec __user *timeout,
+				clockid_t clockid);
 
 /* kernel/hrtimer.c */
 asmlinkage long sys_nanosleep(struct __kernel_timespec __user *rqtp,

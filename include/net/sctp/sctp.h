@@ -115,7 +115,8 @@ int sctp_transport_lookup_process(sctp_callback_t cb, struct net *net,
 				  const union sctp_addr *paddr, void *p);
 int sctp_transport_traverse_process(sctp_callback_t cb, sctp_callback_t cb_done,
 				    struct net *net, int *pos, void *p);
-int sctp_for_each_endpoint(int (*cb)(struct sctp_endpoint *, void *), void *p);
+int sctp_for_each_endpoint(int (*cb)(struct sctp_endpoint *, void *),
+			   struct net *net, int *pos, void *p);
 int sctp_get_sctp_info(struct sock *sk, struct sctp_association *asoc,
 		       struct sctp_info *info);
 
@@ -205,9 +206,9 @@ extern int sysctl_sctp_wmem[3];
  */
 
 /* SCTP SNMP MIB stats handlers */
-#define SCTP_INC_STATS(net, field)	SNMP_INC_STATS((net)->sctp.sctp_statistics, field)
-#define __SCTP_INC_STATS(net, field)	__SNMP_INC_STATS((net)->sctp.sctp_statistics, field)
-#define SCTP_DEC_STATS(net, field)	SNMP_DEC_STATS((net)->sctp.sctp_statistics, field)
+#define SCTP_INC_STATS(net, field)	SNMP_INC_STATS(net_sctp(net).sctp_statistics, field)
+#define __SCTP_INC_STATS(net, field)	__SNMP_INC_STATS(net_sctp(net).sctp_statistics, field)
+#define SCTP_DEC_STATS(net, field)	SNMP_DEC_STATS(net_sctp(net).sctp_statistics, field)
 
 /* sctp mib definitions */
 enum {

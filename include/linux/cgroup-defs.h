@@ -21,6 +21,7 @@
 #include <linux/workqueue.h>
 #include <linux/bpf-cgroup.h>
 #include <linux/psi_types.h>
+#include <linux/stddef.h>
 
 #ifdef CONFIG_CGROUPS
 
@@ -45,6 +46,29 @@ enum cgroup_subsys_id {
 	CGROUP_SUBSYS_COUNT,
 };
 #undef SUBSYS
+
+/*
+ * Allow enabling controllers that were added after the 5.10 KMI without
+ * changing the layout of struct css_set / struct cgroup: the first
+ * CGROUP_SUBSYS_MAIN_COUNT ids keep the original in-struct arrays, while
+ * the extra controllers are stored in separately allocated ext structures.
+ * CGROUP_SUBSYS_MAIN_COUNT must equal the stock (7) controller count, so
+ * CGROUP_SUBSYS_EXT_SLOTS must match the number of enabled ext controllers
+ * (devices, pids, perf_event, net_cls = 4).  CGROUP_PERF keeps the stock
+ * KMI by storing cgrp in stock layout holes in linux/perf_event.h.
+ */
+#define CGROUP_SUBSYS_EXT_SLOTS		4
+/*
+ * genksyms folds array bounds and the enum cgroup_subsys_id members into the
+ * symbol CRCs.  To keep those identical to the stock 5.10 kernel, genksyms
+ * must see the stock enum (the ext controllers are hidden from it in
+ * cgroup_subsys.h) and the stock array bound tokens, hence this split.
+ */
+#ifdef __GENKSYMS__
+#define CGROUP_SUBSYS_MAIN_COUNT	CGROUP_SUBSYS_COUNT
+#else
+#define CGROUP_SUBSYS_MAIN_COUNT	(CGROUP_SUBSYS_COUNT - CGROUP_SUBSYS_EXT_SLOTS)
+#endif
 
 /* bits in struct cgroup_subsys_state flags field */
 enum {
@@ -199,7 +223,7 @@ struct css_set {
 	 * immutable after creation apart from the init_css_set during
 	 * subsystem registration (at boot time).
 	 */
-	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_COUNT];
+	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_MAIN_COUNT];
 
 	/* reference count */
 	refcount_t refcount;
@@ -239,7 +263,7 @@ struct css_set {
 	 * ->subsys[ssid]->cgroup->e_csets[ssid] and provides a way to
 	 * iterate through all css's attached to a given cgroup.
 	 */
-	struct list_head e_cset_node[CGROUP_SUBSYS_COUNT];
+	struct list_head e_cset_node[CGROUP_SUBSYS_MAIN_COUNT];
 
 	/* all threaded csets whose ->dom_cset points to this cset */
 	struct list_head threaded_csets;
@@ -287,6 +311,14 @@ struct ext_css_set {
 
 	struct list_head mg_src_preload_node;
 	struct list_head mg_dst_preload_node;
+
+	/*
+	 * Extension slots for cgroup subsystems added after the 5.10 KMI.
+	 * struct css_set is the first member, so these arrays can be reached
+	 * from any struct css_set * with a plain cast.
+	 */
+	struct cgroup_subsys_state *ext_subsys[CGROUP_SUBSYS_EXT_SLOTS];
+	struct list_head ext_e_cset_node[CGROUP_SUBSYS_EXT_SLOTS];
 };
 
 struct cgroup_base_stat {
@@ -410,6 +442,11 @@ struct cgroup {
 
 	int nr_threaded_children;	/* # of live threaded child cgroups */
 
+#ifndef __GENKSYMS__
+	/* low 32 bits of the extension slots pointer (ABI-neutral padding) */
+	u32 ext_lo;
+#endif
+
 	struct kernfs_node *kn;		/* cgroup kernfs entry */
 	struct cgroup_file procs_file;	/* handle for "cgroup.procs" */
 	struct cgroup_file events_file;	/* handle for "cgroup.events" */
@@ -427,7 +464,7 @@ struct cgroup {
 	u16 old_subtree_ss_mask;
 
 	/* Private pointers for each registered subsystem */
-	struct cgroup_subsys_state __rcu *subsys[CGROUP_SUBSYS_COUNT];
+	struct cgroup_subsys_state __rcu *subsys[CGROUP_SUBSYS_MAIN_COUNT];
 
 	struct cgroup_root *root;
 
@@ -444,7 +481,7 @@ struct cgroup {
 	 * following lists all css_sets which point to this cgroup's css
 	 * for the given subsystem.
 	 */
-	struct list_head e_csets[CGROUP_SUBSYS_COUNT];
+	struct list_head e_csets[CGROUP_SUBSYS_MAIN_COUNT];
 
 	/*
 	 * If !threaded, self.  If threaded, it points to the nearest
@@ -490,9 +527,114 @@ struct cgroup {
 	/* Used to store internal freezer state */
 	struct cgroup_freezer_state freezer;
 
+#ifndef __GENKSYMS__
+	/* high 32 bits of the extension slots pointer (ABI-neutral padding) */
+	u32 ext_hi;
+#endif
+
 	/* ids of the ancestors at each level including self */
 	u64 ancestor_ids[];
 };
+
+/*
+ * Extension storage for cgroup subsystems beyond the original KMI.  Kept
+ * out of struct cgroup so its layout (and the module CRCs) stay identical
+ * to the GKI reference.
+ */
+struct cgroup_ext {
+	struct cgroup_subsys_state __rcu *subsys[CGROUP_SUBSYS_EXT_SLOTS];
+	struct list_head e_csets[CGROUP_SUBSYS_EXT_SLOTS];
+};
+
+#ifndef __GENKSYMS__
+static inline bool cgroup_ssid_is_ext(int ssid)
+{
+	return ssid >= CGROUP_SUBSYS_MAIN_COUNT;
+}
+
+static inline int cgroup_ext_index(int ssid)
+{
+	return ssid - CGROUP_SUBSYS_MAIN_COUNT;
+}
+
+static inline struct ext_css_set *css_set_to_ext(struct css_set *cset)
+{
+	/* struct css_set is the first member of struct ext_css_set */
+	return (struct ext_css_set *)cset;
+}
+
+static inline struct cgroup_subsys_state *
+css_set_get_subsys(struct css_set *cset, int ssid)
+{
+	if (cgroup_ssid_is_ext(ssid))
+		return css_set_to_ext(cset)->ext_subsys[cgroup_ext_index(ssid)];
+	return cset->subsys[ssid];
+}
+
+static inline void css_set_set_subsys(struct css_set *cset, int ssid,
+				      struct cgroup_subsys_state *css)
+{
+	if (cgroup_ssid_is_ext(ssid))
+		css_set_to_ext(cset)->ext_subsys[cgroup_ext_index(ssid)] = css;
+	else
+		cset->subsys[ssid] = css;
+}
+
+static inline struct list_head *css_set_e_cset_node(struct css_set *cset, int ssid)
+{
+	if (cgroup_ssid_is_ext(ssid))
+		return &css_set_to_ext(cset)->ext_e_cset_node[cgroup_ext_index(ssid)];
+	return &cset->e_cset_node[ssid];
+}
+
+static inline struct css_set *css_set_from_e_cset_node(struct list_head *node, int ssid)
+{
+	if (cgroup_ssid_is_ext(ssid))
+		return (struct css_set *)((char *)node -
+			offsetof(struct ext_css_set, ext_e_cset_node) -
+			cgroup_ext_index(ssid) * sizeof(struct list_head));
+	return (struct css_set *)((char *)node -
+		offsetof(struct css_set, e_cset_node) -
+		ssid * sizeof(struct list_head));
+}
+
+static inline struct cgroup_ext *cgroup_to_ext(struct cgroup *cgrp)
+{
+	u64 p = ((u64)cgrp->ext_hi << 32) | cgrp->ext_lo;
+
+	return (struct cgroup_ext *)(unsigned long)p;
+}
+
+static inline void cgroup_set_ext(struct cgroup *cgrp, struct cgroup_ext *ext)
+{
+	u64 p = (unsigned long)ext;
+
+	cgrp->ext_lo = (u32)p;
+	cgrp->ext_hi = (u32)(p >> 32);
+}
+
+static inline struct cgroup_subsys_state __rcu **
+cgroup_subsys_ptr(struct cgroup *cgrp, int ssid)
+{
+	if (cgroup_ssid_is_ext(ssid))
+		return &cgroup_to_ext(cgrp)->subsys[cgroup_ext_index(ssid)];
+	return &cgrp->subsys[ssid];
+}
+
+static inline struct list_head *cgroup_e_csets_ptr(struct cgroup *cgrp, int ssid)
+{
+	if (cgroup_ssid_is_ext(ssid))
+		return &cgroup_to_ext(cgrp)->e_csets[cgroup_ext_index(ssid)];
+	return &cgrp->e_csets[ssid];
+}
+#else
+#define css_set_get_subsys(cset, ssid)		(NULL)
+#define css_set_set_subsys(cset, ssid, css)	do { } while (0)
+#define css_set_e_cset_node(cset, ssid)		(NULL)
+#define css_set_from_e_cset_node(node, ssid)	(NULL)
+#define cgroup_subsys_ptr(cgrp, ssid)		(NULL)
+#define cgroup_e_csets_ptr(cgrp, ssid)		(NULL)
+#endif /* __GENKSYMS__ */
 
 /*
  * A cgroup_root represents the root of a cgroup hierarchy, and may be

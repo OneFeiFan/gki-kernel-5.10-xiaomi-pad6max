@@ -278,9 +278,9 @@ nf_hook_entry_head(struct net *net, int pf, unsigned int hooknum,
 #endif
 #ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
 	case NFPROTO_BRIDGE:
-		if (WARN_ON_ONCE(ARRAY_SIZE(net->nf.hooks_bridge) <= hooknum))
+		if (WARN_ON_ONCE(ARRAY_SIZE(net->nf.additional_info->hooks_bridge) <= hooknum))
 			return NULL;
-		return net->nf.hooks_bridge + hooknum;
+		return net->nf.additional_info->hooks_bridge + hooknum;
 #endif
 #ifdef CONFIG_NETFILTER_INGRESS
 	case NFPROTO_INET:
@@ -710,13 +710,25 @@ __netfilter_net_init(struct nf_hook_entries __rcu **e, int max)
 
 static int __net_init netfilter_net_init(struct net *net)
 {
+#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
+	/* Keep struct netns_nf layout stock-compatible. */
+	BUILD_BUG_ON(offsetof(struct netns_nf, additional_info) != 240);
+	BUILD_BUG_ON(sizeof(struct netns_nf) != 248);
+
+	net->nf.additional_info = kzalloc(sizeof(*net->nf.additional_info),
+					  GFP_KERNEL);
+	if (!net->nf.additional_info)
+		return -ENOMEM;
+#endif
+
 	__netfilter_net_init(net->nf.hooks_ipv4, ARRAY_SIZE(net->nf.hooks_ipv4));
 	__netfilter_net_init(net->nf.hooks_ipv6, ARRAY_SIZE(net->nf.hooks_ipv6));
 #ifdef CONFIG_NETFILTER_FAMILY_ARP
 	__netfilter_net_init(net->nf.hooks_arp, ARRAY_SIZE(net->nf.hooks_arp));
 #endif
 #ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
-	__netfilter_net_init(net->nf.hooks_bridge, ARRAY_SIZE(net->nf.hooks_bridge));
+	__netfilter_net_init(net->nf.additional_info->hooks_bridge,
+			     ARRAY_SIZE(net->nf.additional_info->hooks_bridge));
 #endif
 #ifdef CONFIG_PROC_FS
 	net->nf.proc_netfilter = proc_net_mkdir(net, "netfilter",
@@ -725,6 +737,10 @@ static int __net_init netfilter_net_init(struct net *net)
 		if (!net_eq(net, &init_net))
 			pr_err("cannot create netfilter proc entry");
 
+#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
+		kfree(net->nf.additional_info);
+		net->nf.additional_info = NULL;
+#endif
 		return -ENOMEM;
 	}
 #endif
@@ -734,6 +750,10 @@ static int __net_init netfilter_net_init(struct net *net)
 
 static void __net_exit netfilter_net_exit(struct net *net)
 {
+#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
+	kfree(net->nf.additional_info);
+	net->nf.additional_info = NULL;
+#endif
 	remove_proc_entry("netfilter", net->proc_net);
 }
 

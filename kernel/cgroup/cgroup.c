@@ -503,7 +503,7 @@ static struct cgroup_subsys_state *cgroup_css(struct cgroup *cgrp,
 					      struct cgroup_subsys *ss)
 {
 	if (ss)
-		return rcu_dereference_check(cgrp->subsys[ss->id],
+		return rcu_dereference_check(*cgroup_subsys_ptr(cgrp, ss->id),
 					lockdep_is_held(&cgroup_mutex));
 	else
 		return &cgrp->self;
@@ -588,7 +588,7 @@ struct cgroup_subsys_state *cgroup_e_css(struct cgroup *cgrp,
 		cgrp = cgroup_parent(cgrp);
 	} while (cgrp);
 
-	return init_css_set.subsys[ss->id];
+	return css_set_get_subsys(&init_css_set, ss->id);
 }
 
 /**
@@ -617,7 +617,7 @@ struct cgroup_subsys_state *cgroup_get_e_css(struct cgroup *cgrp,
 		cgrp = cgroup_parent(cgrp);
 	} while (cgrp);
 
-	css = init_css_set.subsys[ss->id];
+	css = css_set_get_subsys(&init_css_set, ss->id);
 	css_get(css);
 out_unlock:
 	rcu_read_unlock();
@@ -677,7 +677,7 @@ struct cgroup_subsys_state *of_css(struct kernfs_open_file *of)
 	 * be and stay valid until the enclosing operation is complete.
 	 */
 	if (cft->ss)
-		return rcu_dereference_raw(cgrp->subsys[cft->ss->id]);
+		return rcu_dereference_raw(*cgroup_subsys_ptr(cgrp, cft->ss->id));
 	else
 		return &cgrp->self;
 }
@@ -694,7 +694,7 @@ EXPORT_SYMBOL_GPL(of_css);
 #define for_each_css(css, ssid, cgrp)					\
 	for ((ssid) = 0; (ssid) < CGROUP_SUBSYS_COUNT; (ssid)++)	\
 		if (!((css) = rcu_dereference_check(			\
-				(cgrp)->subsys[(ssid)],			\
+				*cgroup_subsys_ptr((cgrp), (ssid)),	\
 				lockdep_is_held(&cgroup_mutex)))) { }	\
 		else
 
@@ -969,6 +969,20 @@ static unsigned long css_set_hash(struct cgroup_subsys_state *css[])
 	return key;
 }
 
+/* Same hash as css_set_hash(), but reads through the ext accessors. */
+static unsigned long css_set_hash_cset(struct css_set *cset)
+{
+	unsigned long key = 0UL;
+	struct cgroup_subsys *ss;
+	int i;
+
+	for_each_subsys(ss, i)
+		key += (unsigned long)css_set_get_subsys(cset, i);
+	key = (key >> 16) ^ key;
+
+	return key;
+}
+
 void put_css_set_locked(struct css_set *cset)
 {
 	struct cgrp_cset_link *link, *tmp_link;
@@ -984,8 +998,8 @@ void put_css_set_locked(struct css_set *cset)
 
 	/* This css_set is dead. unlink it and release cgroup and css refs */
 	for_each_subsys(ss, ssid) {
-		list_del(&cset->e_cset_node[ssid]);
-		css_put(cset->subsys[ssid]);
+		list_del(css_set_e_cset_node(cset, ssid));
+		css_put(css_set_get_subsys(cset, ssid));
 	}
 	hash_del(&cset->hlist);
 	css_set_count--;
@@ -1023,14 +1037,16 @@ static bool compare_css_sets(struct css_set *cset,
 {
 	struct cgroup *new_dfl_cgrp;
 	struct list_head *l1, *l2;
+	int i;
 
 	/*
 	 * On the default hierarchy, there can be csets which are
 	 * associated with the same set of cgroups but different csses.
 	 * Let's first ensure that csses match.
 	 */
-	if (memcmp(template, cset->subsys, sizeof(cset->subsys)))
-		return false;
+	for (i = 0; i < CGROUP_SUBSYS_COUNT; i++)
+		if (css_set_get_subsys(cset, i) != template[i])
+			return false;
 
 
 	/* @cset's domain should match the default cgroup's */
@@ -1122,7 +1138,7 @@ static struct css_set *find_existing_css_set(struct css_set *old_cset,
 			 * @ss is not in this hierarchy, so we don't want
 			 * to change the css.
 			 */
-			template[i] = old_cset->subsys[i];
+			template[i] = css_set_get_subsys(old_cset, i);
 		}
 	}
 
@@ -1264,9 +1280,14 @@ static struct css_set *find_css_set(struct css_set *old_cset,
 	INIT_LIST_HEAD(&ext_cset->mg_dst_preload_node);
 	INIT_LIST_HEAD(&cset->mg_node);
 
+	/* initialize the extension slot lists */
+	for (ssid = CGROUP_SUBSYS_MAIN_COUNT; ssid < CGROUP_SUBSYS_COUNT; ssid++)
+		INIT_LIST_HEAD(css_set_e_cset_node(cset, ssid));
+
 	/* Copy the set of subsystem state objects generated in
 	 * find_existing_css_set() */
-	memcpy(cset->subsys, template, sizeof(cset->subsys));
+	for (ssid = 0; ssid < CGROUP_SUBSYS_COUNT; ssid++)
+		css_set_set_subsys(cset, ssid, template[ssid]);
 
 	spin_lock_irq(&css_set_lock);
 	/* Add reference counts and links from the new css_set. */
@@ -1283,14 +1304,14 @@ static struct css_set *find_css_set(struct css_set *old_cset,
 	css_set_count++;
 
 	/* Add @cset to the hash table */
-	key = css_set_hash(cset->subsys);
+	key = css_set_hash_cset(cset);
 	hash_add(css_set_table, &cset->hlist, key);
 
 	for_each_subsys(ss, ssid) {
-		struct cgroup_subsys_state *css = cset->subsys[ssid];
+		struct cgroup_subsys_state *css = css_set_get_subsys(cset, ssid);
 
-		list_add_tail(&cset->e_cset_node[ssid],
-			      &css->cgroup->e_csets[ssid]);
+		list_add_tail(css_set_e_cset_node(cset, ssid),
+			      cgroup_e_csets_ptr(css->cgroup, ssid));
 		css_get(css);
 	}
 
@@ -1351,6 +1372,8 @@ static void cgroup_exit_root_id(struct cgroup_root *root)
 
 void cgroup_free_root(struct cgroup_root *root)
 {
+	if (root != &cgrp_dfl_root)
+		kfree(cgroup_to_ext(&root->cgrp));
 	kfree(root);
 }
 
@@ -1804,7 +1827,6 @@ int rebind_subsystems(struct cgroup_root *dst_root, u16 ss_mask)
 		struct cgroup_root *src_root = ss->root;
 		struct cgroup *scgrp = &src_root->cgrp;
 		struct cgroup_subsys_state *css = cgroup_css(scgrp, ss);
-		struct css_set *cset, *cset_pos;
 		struct css_task_iter *it;
 
 		WARN_ON(!css || cgroup_css(dcgrp, ss));
@@ -1817,27 +1839,36 @@ int rebind_subsystems(struct cgroup_root *dst_root, u16 ss_mask)
 		}
 
 		/* rebind */
-		RCU_INIT_POINTER(scgrp->subsys[ssid], NULL);
-		rcu_assign_pointer(dcgrp->subsys[ssid], css);
+		RCU_INIT_POINTER(*cgroup_subsys_ptr(scgrp, ssid), NULL);
+		rcu_assign_pointer(*cgroup_subsys_ptr(dcgrp, ssid), css);
 		ss->root = dst_root;
 
 		spin_lock_irq(&css_set_lock);
 		css->cgroup = dcgrp;
-		WARN_ON(!list_empty(&dcgrp->e_csets[ss->id]));
-		list_for_each_entry_safe(cset, cset_pos, &scgrp->e_csets[ss->id],
-					 e_cset_node[ss->id]) {
-			list_move_tail(&cset->e_cset_node[ss->id],
-				       &dcgrp->e_csets[ss->id]);
-			/*
-			 * all css_sets of scgrp together in same order to dcgrp,
-			 * patch in-flight iterators to preserve correct iteration.
-			 * since the iterator is always advanced right away and
-			 * finished when it->cset_pos meets it->cset_head, so only
-			 * update it->cset_head is enough here.
-			 */
-			list_for_each_entry(it, &cset->task_iters, iters_node)
-				if (it->cset_head == &scgrp->e_csets[ss->id])
-					it->cset_head = &dcgrp->e_csets[ss->id];
+		{
+			struct list_head *sc_head = cgroup_e_csets_ptr(scgrp, ssid);
+			struct list_head *dc_head = cgroup_e_csets_ptr(dcgrp, ssid);
+			struct list_head *pos, *n;
+
+			WARN_ON(!list_empty(dc_head));
+			list_for_each_safe(pos, n, sc_head) {
+				struct css_set *cset =
+					css_set_from_e_cset_node(pos, ssid);
+
+				list_move_tail(pos, dc_head);
+				/*
+				 * all css_sets of scgrp together in same order to
+				 * dcgrp, patch in-flight iterators to preserve
+				 * correct iteration.  since the iterator is always
+				 * advanced right away and finished when
+				 * it->cset_pos meets it->cset_head, so only update
+				 * it->cset_head is enough here.
+				 */
+				list_for_each_entry(it, &cset->task_iters,
+						    iters_node)
+					if (it->cset_head == sc_head)
+						it->cset_head = dc_head;
+			}
 		}
 		spin_unlock_irq(&css_set_lock);
 
@@ -1986,7 +2017,7 @@ static void init_cgroup_housekeeping(struct cgroup *cgrp)
 	prev_cputime_init(&cgrp->prev_cputime);
 
 	for_each_subsys(ss, ssid)
-		INIT_LIST_HEAD(&cgrp->e_csets[ssid]);
+		INIT_LIST_HEAD(cgroup_e_csets_ptr(cgrp, ssid));
 
 	init_waitqueue_head(&cgrp->offline_waitq);
 	INIT_WORK(&cgrp->release_agent_work, cgroup1_release_agent);
@@ -2466,6 +2497,7 @@ static void cgroup_migrate_add_task(struct task_struct *task,
 
 	mgctx->tset.nr_tasks++;
 
+	css_set_skip_task_iters(cset, task);
 	list_move_tail(&task->cg_list, &cset->mg_tasks);
 	if (list_empty(&cset->mg_node))
 		list_add_tail(&cset->mg_node,
@@ -2524,9 +2556,10 @@ struct task_struct *cgroup_taskset_next(struct cgroup_taskset *tset,
 			 * has its ->mg_dst_cset set.
 			 */
 			if (cset->mg_dst_cset)
-				*dst_cssp = cset->mg_dst_cset->subsys[tset->ssid];
+				*dst_cssp = css_set_get_subsys(cset->mg_dst_cset,
+							       tset->ssid);
 			else
-				*dst_cssp = cset->subsys[tset->ssid];
+				*dst_cssp = css_set_get_subsys(cset, tset->ssid);
 
 			return task;
 		}
@@ -2830,7 +2863,8 @@ int cgroup_migrate_prepare_dst(struct cgroup_mgctx *mgctx)
 			put_css_set(dst_cset);
 
 		for_each_subsys(ss, ssid)
-			if (src_cset->subsys[ssid] != dst_cset->subsys[ssid])
+			if (css_set_get_subsys(src_cset, ssid) !=
+			    css_set_get_subsys(dst_cset, ssid))
 				mgctx->ss_mask |= 1 << ssid;
 	}
 
@@ -4591,7 +4625,7 @@ static struct css_set *css_task_iter_next_css_set(struct css_task_iter *it)
 	}
 
 	if (it->ss) {
-		cset = container_of(l, struct css_set, e_cset_node[it->ss->id]);
+		cset = css_set_from_e_cset_node(l, it->ss->id);
 	} else {
 		link = list_entry(l, struct cgrp_cset_link, cset_link);
 		cset = link->cset;
@@ -4754,7 +4788,7 @@ void css_task_iter_start(struct cgroup_subsys_state *css, unsigned int flags,
 	it->flags = flags;
 
 	if (it->ss)
-		it->cset_pos = &css->cgroup->e_csets[css->ss->id];
+		it->cset_pos = cgroup_e_csets_ptr(css->cgroup, css->ss->id);
 	else
 		it->cset_pos = &css->cgroup->cset_links;
 
@@ -5216,6 +5250,7 @@ static void css_free_rwork_fn(struct work_struct *work)
 			psi_cgroup_free(cgrp);
 			if (cgroup_on_dfl(cgrp))
 				cgroup_rstat_exit(cgrp);
+			kfree(cgroup_to_ext(cgrp));
 			kfree(cgrp);
 		} else {
 			/*
@@ -5332,7 +5367,7 @@ static int online_css(struct cgroup_subsys_state *css)
 		ret = ss->css_online(css);
 	if (!ret) {
 		css->flags |= CSS_ONLINE;
-		rcu_assign_pointer(css->cgroup->subsys[ss->id], css);
+		rcu_assign_pointer(*cgroup_subsys_ptr(css->cgroup, ss->id), css);
 
 		atomic_inc(&css->online_cnt);
 		if (css->parent)
@@ -5355,7 +5390,7 @@ static void offline_css(struct cgroup_subsys_state *css)
 		ss->css_offline(css);
 
 	css->flags &= ~CSS_ONLINE;
-	RCU_INIT_POINTER(css->cgroup->subsys[ss->id], NULL);
+	RCU_INIT_POINTER(*cgroup_subsys_ptr(css->cgroup, ss->id), NULL);
 
 	wake_up_all(&css->cgroup->offline_waitq);
 }
@@ -5443,6 +5478,16 @@ static struct cgroup *cgroup_create(struct cgroup *parent, const char *name,
 		       GFP_KERNEL);
 	if (!cgrp)
 		return ERR_PTR(-ENOMEM);
+
+	{
+		struct cgroup_ext *ext = kzalloc(sizeof(*ext), GFP_KERNEL);
+
+		if (!ext) {
+			kfree(cgrp);
+			return ERR_PTR(-ENOMEM);
+		}
+		cgroup_set_ext(cgrp, ext);
+	}
 
 	ret = percpu_ref_init(&cgrp->self.refcnt, css_release, 0, GFP_KERNEL);
 	if (ret)
@@ -5546,6 +5591,7 @@ out_stat_exit:
 out_cancel_ref:
 	percpu_ref_exit(&cgrp->self.refcnt);
 out_free_cgrp:
+	kfree(cgroup_to_ext(cgrp));
 	kfree(cgrp);
 	return ERR_PTR(ret);
 }
@@ -5864,7 +5910,7 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
 	 * pointer to this state - since the subsystem is
 	 * newly registered, all tasks and hence the
 	 * init_css_set is in the subsystem's root cgroup. */
-	init_css_set.subsys[ss->id] = css;
+	css_set_set_subsys(&init_css_set, ss->id, css);
 
 	have_fork_callback |= (bool)ss->fork << ss->id;
 	have_exit_callback |= (bool)ss->exit << ss->id;
@@ -5887,12 +5933,24 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
  * Initialize cgroups at system boot, and initialize any
  * subsystems that request early init.
  */
+static struct cgroup_ext cgrp_dfl_root_ext;
+
 int __init cgroup_init_early(void)
 {
 	static struct cgroup_fs_context __initdata ctx;
 	struct cgroup_subsys *ss;
 	int i;
 
+	/*
+	 * The hidden ext pointer must live in existing struct padding so the
+	 * layout seen by vendor modules is unchanged.  If these fire, the
+	 * controller set or the config changed the stock layout.
+	 */
+	BUILD_BUG_ON(CGROUP_SUBSYS_MAIN_COUNT != 7);
+	BUILD_BUG_ON(offsetof(struct cgroup, ext_lo) != 276);
+	BUILD_BUG_ON(offsetof(struct cgroup, ext_hi) != 2748);
+
+	cgroup_set_ext(&cgrp_dfl_root.cgrp, &cgrp_dfl_root_ext);
 	ctx.root = &cgrp_dfl_root;
 	init_cgroup_root(&ctx);
 	cgrp_dfl_root.cgrp.self.flags |= CSS_NO_REF;
@@ -5950,7 +6008,7 @@ int __init cgroup_init(void)
 	 * it during init.
 	 */
 	hash_add(css_set_table, &init_css_set.hlist,
-		 css_set_hash(init_css_set.subsys));
+		 css_set_hash_cset(&init_css_set));
 
 	BUG_ON(cgroup_setup_root(&cgrp_dfl_root, 0));
 
@@ -5959,7 +6017,7 @@ int __init cgroup_init(void)
 	for_each_subsys(ss, ssid) {
 		if (ss->early_init) {
 			struct cgroup_subsys_state *css =
-				init_css_set.subsys[ss->id];
+				css_set_get_subsys(&init_css_set, ss->id);
 
 			css->id = cgroup_idr_alloc(&ss->css_idr, css, 1, 2,
 						   GFP_KERNEL);
@@ -5968,8 +6026,8 @@ int __init cgroup_init(void)
 			cgroup_init_subsys(ss, false);
 		}
 
-		list_add_tail(&init_css_set.e_cset_node[ssid],
-			      &cgrp_dfl_root.cgrp.e_csets[ssid]);
+		list_add_tail(css_set_e_cset_node(&init_css_set, ssid),
+			      cgroup_e_csets_ptr(&cgrp_dfl_root.cgrp, ssid));
 
 		/*
 		 * Setting dfl_root subsys_mask needs to consider the
@@ -6004,17 +6062,17 @@ int __init cgroup_init(void)
 		}
 
 		if (ss->bind)
-			ss->bind(init_css_set.subsys[ssid]);
+			ss->bind(css_set_get_subsys(&init_css_set, ssid));
 
 		mutex_lock(&cgroup_mutex);
-		css_populate_dir(init_css_set.subsys[ssid]);
+		css_populate_dir(css_set_get_subsys(&init_css_set, ssid));
 		mutex_unlock(&cgroup_mutex);
 	}
 
 	/* init_css_set.subsys[] has been updated, re-hash */
 	hash_del(&init_css_set.hlist);
 	hash_add(css_set_table, &init_css_set.hlist,
-		 css_set_hash(init_css_set.subsys));
+		 css_set_hash_cset(&init_css_set));
 
 	WARN_ON(sysfs_create_mount_point(fs_kobj, "cgroup"));
 	WARN_ON(register_filesystem(&cgroup_fs_type));

@@ -73,7 +73,8 @@ static enum sctp_disposition sctp_sf_do_5_2_6_stale(
 					const struct sctp_association *asoc,
 					const union sctp_subtype type,
 					void *arg,
-					struct sctp_cmd_seq *commands);
+					struct sctp_cmd_seq *commands,
+					struct sctp_errhdr *err);
 static enum sctp_disposition sctp_sf_shut_8_4_5(
 					struct net *net,
 					const struct sctp_endpoint *ep,
@@ -348,7 +349,7 @@ enum sctp_disposition sctp_sf_do_5_1B_init(struct net *net,
 	/* If the packet is an OOTB packet which is temporarily on the
 	 * control endpoint, respond with an ABORT.
 	 */
-	if (ep == sctp_sk(net->sctp.ctl_sock)->ep) {
+	if (ep == sctp_sk(net_sctp(net).ctl_sock)->ep) {
 		SCTP_INC_STATS(net, SCTP_MIB_OUTOFBLUES);
 		return sctp_sf_tabort_8_4_8(net, ep, asoc, type, arg, commands);
 	}
@@ -631,7 +632,7 @@ static bool sctp_auth_chunk_verify(struct net *net, struct sctp_chunk *chunk,
 	struct sctp_chunk auth;
 
 	if (!chunk->auth_chunk)
-		return true;
+		return !sctp_auth_recv_cid(chunk->chunk_hdr->type, asoc);
 
 	/* SCTP-AUTH:  auth_chunk pointer is only set when the cookie-echo
 	 * is supposed to be authenticated and we have to do delayed
@@ -641,7 +642,7 @@ static bool sctp_auth_chunk_verify(struct net *net, struct sctp_chunk *chunk,
 	 */
 
 	/* Make sure that we and the peer are AUTH capable */
-	if (!net->sctp.auth_enable || !asoc->peer.auth_capable)
+	if (!net_sctp(net).auth_enable || !asoc->peer.auth_capable)
 		return false;
 
 	/* set-up our fake chunk so that we can process it */
@@ -710,7 +711,7 @@ enum sctp_disposition sctp_sf_do_5_1D_ce(struct net *net,
 	/* If the packet is an OOTB packet which is temporarily on the
 	 * control endpoint, respond with an ABORT.
 	 */
-	if (ep == sctp_sk(net->sctp.ctl_sock)->ep) {
+	if (ep == sctp_sk(net_sctp(net).ctl_sock)->ep) {
 		SCTP_INC_STATS(net, SCTP_MIB_OUTOFBLUES);
 		return sctp_sf_tabort_8_4_8(net, ep, asoc, type, arg, commands);
 	}
@@ -1299,7 +1300,7 @@ static int sctp_sf_send_restart_abort(struct net *net, union sctp_addr *ssa,
 	errhdr->length = htons(len);
 
 	/* Assign to the control socket. */
-	ep = sctp_sk(net->sctp.ctl_sock)->ep;
+	ep = sctp_sk(net_sctp(net).ctl_sock)->ep;
 
 	/* Association is NULL since this may be a restart attack and we
 	 * want to send back the attacker's vtag.
@@ -1507,6 +1508,12 @@ static enum sctp_disposition sctp_sf_do_unexpected_init(
 
 	/* Tag the variable length parameters.  */
 	chunk->param_hdr.v = skb_pull(chunk->skb, sizeof(struct sctp_inithdr));
+
+	if (asoc->state >= SCTP_STATE_ESTABLISHED) {
+		/* Discard INIT matching peer vtag after handshake completion (stale INIT). */
+		if (ntohl(chunk->subh.init_hdr->init_tag) == asoc->peer.i.init_tag)
+			return sctp_sf_pdiscard(net, ep, asoc, type, arg, commands);
+	}
 
 	/* Verify the INIT chunk before processing it. */
 	err_chunk = NULL;
@@ -1765,7 +1772,7 @@ enum sctp_disposition sctp_sf_do_5_2_3_initack(
 	/* Per the above section, we'll discard the chunk if we have an
 	 * endpoint.  If this is an OOTB INIT-ACK, treat it as such.
 	 */
-	if (ep == sctp_sk(net->sctp.ctl_sock)->ep)
+	if (ep == sctp_sk(net_sctp(net).ctl_sock)->ep)
 		return sctp_sf_ootb(net, ep, asoc, type, arg, commands);
 	else
 		return sctp_sf_discard_chunk(net, ep, asoc, type, arg, commands);
@@ -2413,9 +2420,15 @@ enum sctp_disposition sctp_sf_cookie_echoed_err(
 	 * errors.
 	 */
 	sctp_walk_errors(err, chunk->chunk_hdr) {
-		if (SCTP_ERROR_STALE_COOKIE == err->cause)
-			return sctp_sf_do_5_2_6_stale(net, ep, asoc, type,
-							arg, commands);
+		if (err->cause != SCTP_ERROR_STALE_COOKIE)
+			continue;
+		/* The staleness is only meaningful if the cause is long
+		 * enough to hold it; a shorter one is malformed.
+		 */
+		if (ntohs(err->length) < sizeof(*err) + sizeof(__be32))
+			break;
+		return sctp_sf_do_5_2_6_stale(net, ep, asoc, type,
+					      arg, commands, err);
 	}
 
 	/* It is possible to have malformed error causes, and that
@@ -2457,13 +2470,13 @@ static enum sctp_disposition sctp_sf_do_5_2_6_stale(
 					const struct sctp_association *asoc,
 					const union sctp_subtype type,
 					void *arg,
-					struct sctp_cmd_seq *commands)
+					struct sctp_cmd_seq *commands,
+					struct sctp_errhdr *err)
 {
 	int attempts = asoc->init_err_counter + 1;
-	struct sctp_chunk *chunk = arg, *reply;
 	struct sctp_cookie_preserve_param bht;
 	struct sctp_bind_addr *bp;
-	struct sctp_errhdr *err;
+	struct sctp_chunk *reply;
 	u32 stale;
 
 	if (attempts > asoc->max_init_attempts) {
@@ -2473,8 +2486,6 @@ static enum sctp_disposition sctp_sf_do_5_2_6_stale(
 				SCTP_PERR(SCTP_ERROR_STALE_COOKIE));
 		return SCTP_DISPOSITION_DELETE_TCB;
 	}
-
-	err = (struct sctp_errhdr *)(chunk->skb->data);
 
 	/* When calculating the time extension, an implementation
 	 * SHOULD use the RTT information measured based on the
@@ -2517,11 +2528,7 @@ static enum sctp_disposition sctp_sf_do_5_2_6_stale(
 	 */
 	sctp_add_cmd_sf(commands, SCTP_CMD_DEL_NON_PRIMARY, SCTP_NULL());
 
-	/* If we've sent any data bundled with COOKIE-ECHO we will need to
-	 * resend
-	 */
-	sctp_add_cmd_sf(commands, SCTP_CMD_T1_RETRAN,
-			SCTP_TRANSPORT(asoc->peer.primary_path));
+	sctp_add_cmd_sf(commands, SCTP_CMD_PURGE_OUTQUEUE, SCTP_NULL());
 
 	/* Cast away the const modifier, as we want to just
 	 * rerun it through as a sideffect.
@@ -2536,6 +2543,8 @@ static enum sctp_disposition sctp_sf_do_5_2_6_stale(
 			SCTP_TO(SCTP_EVENT_TIMEOUT_T1_INIT));
 
 	sctp_add_cmd_sf(commands, SCTP_CMD_REPLY, SCTP_CHUNK(reply));
+
+	sctp_add_cmd_sf(commands, SCTP_CMD_DISCARD_PACKET, SCTP_NULL());
 
 	return SCTP_DISPOSITION_CONSUME;
 
@@ -3786,7 +3795,7 @@ enum sctp_disposition sctp_sf_do_asconf(struct net *net,
 	 * described in [I-D.ietf-tsvwg-sctp-auth].
 	 */
 	if (!asoc->peer.asconf_capable ||
-	    (!net->sctp.addip_noauth && !chunk->auth))
+	    (!net_sctp(net).addip_noauth && !chunk->auth))
 		return sctp_sf_pdiscard(net, ep, asoc, type, arg, commands);
 
 	hdr = (struct sctp_addiphdr *)chunk->skb->data;
@@ -3929,7 +3938,7 @@ enum sctp_disposition sctp_sf_do_asconf_ack(struct net *net,
 	 * described in [I-D.ietf-tsvwg-sctp-auth].
 	 */
 	if (!asoc->peer.asconf_capable ||
-	    (!net->sctp.addip_noauth && !asconf_ack->auth))
+	    (!net_sctp(net).addip_noauth && !asconf_ack->auth))
 		return sctp_sf_pdiscard(net, ep, asoc, type, arg, commands);
 
 	addip_hdr = (struct sctp_addiphdr *)asconf_ack->skb->data;
@@ -5992,8 +6001,12 @@ enum sctp_disposition sctp_sf_t4_timer_expire(
 					struct sctp_cmd_seq *commands)
 {
 	struct sctp_chunk *chunk = asoc->addip_last_asconf;
-	struct sctp_transport *transport = chunk->transport;
+	struct sctp_transport *transport;
 
+	if (!chunk)
+		return SCTP_DISPOSITION_CONSUME;
+
+	transport = chunk->transport;
 	SCTP_INC_STATS(net, SCTP_MIB_T4_RTO_EXPIREDS);
 
 	/* ADDIP 4.1 B1) Increment the error counters and perform path failure
@@ -6322,7 +6335,7 @@ static struct sctp_packet *sctp_ootb_pkt_new(
 	 * the source address.
 	 */
 	sctp_transport_route(transport, (union sctp_addr *)&chunk->dest,
-			     sctp_sk(net->sctp.ctl_sock));
+			     sctp_sk(net_sctp(net).ctl_sock));
 
 	packet = &transport->packet;
 	sctp_packet_init(packet, transport, sport, dport);

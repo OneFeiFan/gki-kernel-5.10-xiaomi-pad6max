@@ -362,10 +362,10 @@ static void sctp_auto_asconf_init(struct sctp_sock *sp)
 {
 	struct net *net = sock_net(&sp->inet.sk);
 
-	if (net->sctp.default_auto_asconf) {
-		spin_lock_bh(&net->sctp.addr_wq_lock);
-		list_add_tail(&sp->auto_asconf_list, &net->sctp.auto_asconf_splist);
-		spin_unlock_bh(&net->sctp.addr_wq_lock);
+	if (net_sctp(net).default_auto_asconf) {
+		spin_lock_bh(&net_sctp(net).addr_wq_lock);
+		list_add_tail(&sp->auto_asconf_list, &net_sctp(net).auto_asconf_splist);
+		spin_unlock_bh(&net_sctp(net).addr_wq_lock);
 		sp->do_auto_asconf = 1;
 	}
 }
@@ -1543,7 +1543,7 @@ static void sctp_close(struct sock *sk, long timeout)
 	 * Also, sctp_destroy_sock() needs to be called with addr_wq_lock
 	 * held and that should be grabbed before socket lock.
 	 */
-	spin_lock_bh(&net->sctp.addr_wq_lock);
+	spin_lock_bh(&net_sctp(net).addr_wq_lock);
 	bh_lock_sock_nested(sk);
 
 	/* Hold the sock, since sk_common_release() will put sock_put()
@@ -1553,7 +1553,7 @@ static void sctp_close(struct sock *sk, long timeout)
 	sk_common_release(sk);
 
 	bh_unlock_sock(sk);
-	spin_unlock_bh(&net->sctp.addr_wq_lock);
+	spin_unlock_bh(&net_sctp(net).addr_wq_lock);
 
 	sock_put(sk);
 
@@ -1993,6 +1993,15 @@ static int sctp_sendmsg(struct sock *sk, struct msghdr *msg, size_t msg_len)
 				goto out_unlock;
 
 			iov_iter_revert(&msg->msg_iter, err);
+
+			/* sctp_sendmsg_to_asoc() may have released the socket
+			 * lock (sctp_wait_for_sndbuf), during which other
+			 * associations on ep->asocs could have been peeled
+			 * off or freed.  @asoc itself is revalidated by the
+			 * base.dead and base.sk checks in sctp_wait_for_sndbuf,
+			 * so re-derive the cached cursor from it.
+			 */
+			tmp = list_next_entry(asoc, asocs);
 		}
 
 		goto out_unlock;
@@ -2279,8 +2288,8 @@ static int sctp_setsockopt_autoclose(struct sock *sk, u32 *optval,
 		return -EINVAL;
 
 	sp->autoclose = *optval;
-	if (sp->autoclose > net->sctp.max_autoclose)
-		sp->autoclose = net->sctp.max_autoclose;
+	if (sp->autoclose > net_sctp(net).max_autoclose)
+		sp->autoclose = net_sctp(net).max_autoclose;
 
 	return 0;
 }
@@ -3852,16 +3861,16 @@ static int sctp_setsockopt_auto_asconf(struct sock *sk, int *val,
 	if ((*val && sp->do_auto_asconf) || (!*val && !sp->do_auto_asconf))
 		return 0;
 
-	spin_lock_bh(&sock_net(sk)->sctp.addr_wq_lock);
+	spin_lock_bh(&net_sctp(sock_net(sk)).addr_wq_lock);
 	if (*val == 0 && sp->do_auto_asconf) {
 		list_del(&sp->auto_asconf_list);
 		sp->do_auto_asconf = 0;
 	} else if (*val && !sp->do_auto_asconf) {
 		list_add_tail(&sp->auto_asconf_list,
-		    &sock_net(sk)->sctp.auto_asconf_splist);
+		    &net_sctp(sock_net(sk)).auto_asconf_splist);
 		sp->do_auto_asconf = 1;
 	}
-	spin_unlock_bh(&sock_net(sk)->sctp.addr_wq_lock);
+	spin_unlock_bh(&net_sctp(sock_net(sk)).addr_wq_lock);
 	return 0;
 }
 
@@ -4239,7 +4248,7 @@ static int sctp_setsockopt_interleaving_supported(struct sock *sk,
 	if (!asoc && p->assoc_id != SCTP_FUTURE_ASSOC && sctp_style(sk, UDP))
 		return -EINVAL;
 
-	if (!sock_net(sk)->sctp.intl_enable || !sp->frag_interleave) {
+	if (!net_sctp(sock_net(sk)).intl_enable || !sp->frag_interleave) {
 		return -EPERM;
 	}
 
@@ -4867,9 +4876,9 @@ static int sctp_init_sock(struct sock *sk)
 	sp->default_timetolive = 0;
 
 	sp->default_rcv_context = 0;
-	sp->max_burst = net->sctp.max_burst;
+	sp->max_burst = net_sctp(net).max_burst;
 
-	sp->sctp_hmac_alg = net->sctp.sctp_hmac_alg;
+	sp->sctp_hmac_alg = net_sctp(net).sctp_hmac_alg;
 
 	/* Initialize default setup parameters. These parameters
 	 * can be modified with the SCTP_INITMSG socket option or
@@ -4877,24 +4886,24 @@ static int sctp_init_sock(struct sock *sk)
 	 */
 	sp->initmsg.sinit_num_ostreams   = sctp_max_outstreams;
 	sp->initmsg.sinit_max_instreams  = sctp_max_instreams;
-	sp->initmsg.sinit_max_attempts   = net->sctp.max_retrans_init;
-	sp->initmsg.sinit_max_init_timeo = net->sctp.rto_max;
+	sp->initmsg.sinit_max_attempts   = net_sctp(net).max_retrans_init;
+	sp->initmsg.sinit_max_init_timeo = net_sctp(net).rto_max;
 
 	/* Initialize default RTO related parameters.  These parameters can
 	 * be modified for with the SCTP_RTOINFO socket option.
 	 */
-	sp->rtoinfo.srto_initial = net->sctp.rto_initial;
-	sp->rtoinfo.srto_max     = net->sctp.rto_max;
-	sp->rtoinfo.srto_min     = net->sctp.rto_min;
+	sp->rtoinfo.srto_initial = net_sctp(net).rto_initial;
+	sp->rtoinfo.srto_max     = net_sctp(net).rto_max;
+	sp->rtoinfo.srto_min     = net_sctp(net).rto_min;
 
 	/* Initialize default association related parameters. These parameters
 	 * can be modified with the SCTP_ASSOCINFO socket option.
 	 */
-	sp->assocparams.sasoc_asocmaxrxt = net->sctp.max_retrans_association;
+	sp->assocparams.sasoc_asocmaxrxt = net_sctp(net).max_retrans_association;
 	sp->assocparams.sasoc_number_peer_destinations = 0;
 	sp->assocparams.sasoc_peer_rwnd = 0;
 	sp->assocparams.sasoc_local_rwnd = 0;
-	sp->assocparams.sasoc_cookie_life = net->sctp.valid_cookie_life;
+	sp->assocparams.sasoc_cookie_life = net_sctp(net).valid_cookie_life;
 
 	/* Initialize default event subscriptions. By default, all the
 	 * options are off.
@@ -4904,13 +4913,13 @@ static int sctp_init_sock(struct sock *sk)
 	/* Default Peer Address Parameters.  These defaults can
 	 * be modified via SCTP_PEER_ADDR_PARAMS
 	 */
-	sp->hbinterval  = net->sctp.hb_interval;
-	sp->pathmaxrxt  = net->sctp.max_retrans_path;
-	sp->pf_retrans  = net->sctp.pf_retrans;
-	sp->ps_retrans  = net->sctp.ps_retrans;
-	sp->pf_expose   = net->sctp.pf_expose;
+	sp->hbinterval  = net_sctp(net).hb_interval;
+	sp->pathmaxrxt  = net_sctp(net).max_retrans_path;
+	sp->pf_retrans  = net_sctp(net).pf_retrans;
+	sp->ps_retrans  = net_sctp(net).ps_retrans;
+	sp->pf_expose   = net_sctp(net).pf_expose;
 	sp->pathmtu     = 0; /* allow default discovery */
-	sp->sackdelay   = net->sctp.sack_timeout;
+	sp->sackdelay   = net_sctp(net).sack_timeout;
 	sp->sackfreq	= 2;
 	sp->param_flags = SPP_HB_ENABLE |
 			  SPP_PMTUD_ENABLE |
@@ -4974,7 +4983,7 @@ static int sctp_init_sock(struct sock *sk)
 }
 
 /* Cleanup any SCTP per socket resources. Must be called with
- * sock_net(sk)->sctp.addr_wq_lock held if sp->do_auto_asconf is true
+ * net_sctp(sock_net(sk)).addr_wq_lock held if sp->do_auto_asconf is true
  */
 static void sctp_destroy_sock(struct sock *sk)
 {
@@ -5196,24 +5205,39 @@ struct sctp_transport *sctp_transport_get_idx(struct net *net,
 }
 
 int sctp_for_each_endpoint(int (*cb)(struct sctp_endpoint *, void *),
-			   void *p) {
-	int err = 0;
-	int hash = 0;
-	struct sctp_endpoint *ep;
+			   struct net *net, int *pos, void *p) {
+	int err, hash = 0, idx = 0, start;
 	struct sctp_hashbucket *head;
+	struct sctp_endpoint *ep;
 
 	for (head = sctp_ep_hashtable; hash < sctp_ep_hashsize;
 	     hash++, head++) {
+		start = idx;
+again:
 		read_lock_bh(&head->lock);
 		sctp_for_each_hentry(ep, &head->chain) {
-			err = cb(ep, p);
-			if (err)
+			if (sock_net(ep->base.sk) != net)
+				continue;
+			if (idx++ >= *pos) {
+				sctp_endpoint_hold(ep);
 				break;
+			}
 		}
 		read_unlock_bh(&head->lock);
+
+		if (ep) {
+			err = cb(ep, p);
+			sctp_endpoint_put(ep);
+			if (err)
+				return err;
+			(*pos)++;
+
+			idx = start;
+			goto again;
+		}
 	}
 
-	return err;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(sctp_for_each_endpoint);
 
@@ -6087,7 +6111,7 @@ static int sctp_copy_laddrs(struct sock *sk, __u16 port, void *to,
 	struct net *net = sock_net(sk);
 
 	rcu_read_lock();
-	list_for_each_entry_rcu(addr, &net->sctp.local_addr_list, list) {
+	list_for_each_entry_rcu(addr, &net_sctp(net).local_addr_list, list) {
 		if (!addr->valid)
 			continue;
 
@@ -6876,7 +6900,7 @@ static int sctp_getsockopt_peer_auth_chunks(struct sock *sk, int len,
 
 	/* See if the user provided enough room for all the data */
 	num_chunks = ntohs(ch->param_hdr.length) - sizeof(struct sctp_paramhdr);
-	if (len < num_chunks)
+	if (len < sizeof(struct sctp_authchunks) + num_chunks)
 		return -EINVAL;
 
 	if (copy_to_user(to, ch->chunks, num_chunks))
@@ -9113,6 +9137,8 @@ static int sctp_wait_for_connect(struct sctp_association *asoc, long *timeo_p)
 		release_sock(sk);
 		current_timeo = schedule_timeout(current_timeo);
 		lock_sock(sk);
+		if (sk != asoc->base.sk)
+			goto do_error;
 
 		*timeo_p = current_timeo;
 	}
@@ -9328,7 +9354,7 @@ static int sctp_sock_migrate(struct sock *oldsk, struct sock *newsk,
 		return err;
 
 	/* New ep's auth_hmacs should be set if old ep's is set, in case
-	 * that net->sctp.auth_enable has been changed to 0 by users and
+	 * that net_sctp(net).auth_enable has been changed to 0 by users and
 	 * new ep's auth_hmacs couldn't be set in sctp_endpoint_init().
 	 */
 	if (oldsp->ep->auth_hmacs) {

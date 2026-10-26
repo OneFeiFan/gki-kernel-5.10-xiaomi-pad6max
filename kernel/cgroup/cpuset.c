@@ -413,10 +413,12 @@ static inline void check_insane_mems_config(nodemask_t *nodes)
  * requested and won't be changed by hotplug events. Only the effective
  * cpus or mems will be affected.
  */
+static bool cpuset_v2_mode;
+
 static inline bool is_in_v2_mode(void)
 {
 	return cgroup_subsys_on_dfl(cpuset_cgrp_subsys) ||
-	      (cpuset_cgrp_subsys.root->flags & CGRP_ROOT_CPUSET_V2_MODE);
+	      READ_ONCE(cpuset_v2_mode);
 }
 
 /*
@@ -1807,7 +1809,12 @@ static void update_tasks_nodemask(struct cpuset *cs)
 
 		migrate = is_memory_migrate(cs);
 
-		mpol_rebind_mm(mm, &cs->mems_allowed);
+		/*
+		 * For v1 we can have empty effective_mems, but we cannot
+		 * attach any tasks (see cpuset_can_attach_check()). For v2,
+		 * effective_mems is guaranteed to not be empty.
+		 */
+		mpol_rebind_mm(mm, &cs->effective_mems);
 		if (migrate)
 			cpuset_migrate_mm(mm, &cs->old_mems_allowed, &newmems);
 		else
@@ -3018,6 +3025,8 @@ static void cpuset_bind(struct cgroup_subsys_state *root_css)
 	mutex_lock(&cpuset_mutex);
 	spin_lock_irq(&callback_lock);
 
+	WRITE_ONCE(cpuset_v2_mode,
+		   !!(cpuset_cgrp_subsys.root->flags & CGRP_ROOT_CPUSET_V2_MODE));
 	if (is_in_v2_mode()) {
 		cpumask_copy(top_cpuset.cpus_allowed, cpu_possible_mask);
 		top_cpuset.mems_allowed = node_possible_map;

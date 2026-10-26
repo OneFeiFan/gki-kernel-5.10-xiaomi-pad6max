@@ -14,7 +14,12 @@ struct nf_queue_entry {
 	struct sk_buff		*skb;
 	unsigned int		id;
 	unsigned int		hook_index;	/* index in hook_entries->hook[] */
-#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
+#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER) && !defined(__GENKSYMS__)
+	/*
+	 * Internal to nf_queue: keep it invisible to genksyms so the CRCs of
+	 * symbols whose types reach nf_queue_entry stay identical to stock.
+	 */
+	struct net_device	*bridge_dev;
 	struct net_device	*physin;
 	struct net_device	*physout;
 #endif

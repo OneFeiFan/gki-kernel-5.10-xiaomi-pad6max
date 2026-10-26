@@ -123,15 +123,29 @@ struct net {
 	struct netns_packet	packet;
 	struct netns_unix	unx;
 	struct netns_nexthop	nexthop;
+#if (defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)) && !defined(__GENKSYMS__)
+	/*
+	 * The stock layout has 40 bytes of padding between nexthop and ipv4
+	 * (ipv4 is cacheline aligned).  netns_nftables is 16 bytes and fits
+	 * there, so struct net keeps its original layout while genksyms
+	 * still sees the stock declaration.
+	 */
+	struct netns_nftables	nft;
+#endif
+#if IS_ENABLED(CONFIG_IP_VS) && !defined(__GENKSYMS__)
+	/* Fills stock layout padding (offset 680). */
+	struct netns_ipvs	*ipvs;
+#endif
+#if IS_ENABLED(CONFIG_IP_SCTP) && !defined(__GENKSYMS__)
+	/* Fills stock layout padding (offset 688); see net_sctp(). */
+	struct netns_sctp	*sctp_ext;
+#endif
 	struct netns_ipv4	ipv4;
 #if IS_ENABLED(CONFIG_IPV6)
 	struct netns_ipv6	ipv6;
 #endif
 #if IS_ENABLED(CONFIG_IEEE802154_6LOWPAN)
 	struct netns_ieee802154_lowpan	ieee802154_lowpan;
-#endif
-#if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
-	struct netns_sctp	sctp;
 #endif
 #if defined(CONFIG_IP_DCCP) || defined(CONFIG_IP_DCCP_MODULE)
 	struct netns_dccp	dccp;
@@ -141,9 +155,6 @@ struct net {
 	struct netns_xt		xt;
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 	struct netns_ct		ct;
-#endif
-#if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
-	struct netns_nftables	nft;
 #endif
 #if IS_ENABLED(CONFIG_NF_DEFRAG_IPV6)
 	struct netns_nf_frag	nf_frag;
@@ -173,9 +184,6 @@ struct net {
 
 	atomic64_t		net_cookie; /* written once */
 
-#if IS_ENABLED(CONFIG_IP_VS)
-	struct netns_ipvs	*ipvs;
-#endif
 #if IS_ENABLED(CONFIG_MPLS)
 	struct netns_mpls	mpls;
 #endif
@@ -190,6 +198,14 @@ struct net {
 #endif
 	struct sock		*diag_nlsk;
 } __randomize_layout;
+
+#if IS_ENABLED(CONFIG_IP_SCTP)
+/*
+ * SCTP per-net state is allocated separately (see sctp_defaults_init) and
+ * reached through sctp_ext, so struct net keeps its stock layout.
+ */
+#define net_sctp(__net)	(*(__net)->sctp_ext)
+#endif
 
 #include <linux/seq_file_net.h>
 

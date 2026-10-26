@@ -573,10 +573,6 @@ struct request_queue {
 	struct bsg_class_device bsg_dev;
 #endif
 
-#ifdef CONFIG_BLK_DEV_THROTTLING
-	/* Throttle data */
-	struct throtl_data *td;
-#endif
 	struct rcu_head		rcu_head;
 	wait_queue_head_t	mq_freeze_wq;
 	/*
@@ -603,7 +599,22 @@ struct request_queue {
 #define BLK_MAX_WRITE_HINTS	5
 	u64			write_hints[BLK_MAX_WRITE_HINTS];
 
+	/*
+	 * Throttle data overlays KABI reserve 1; hidden from genksyms so
+	 * request_queue's KMI CRC stays at the stock value.
+	 */
+#if defined(CONFIG_BLK_DEV_THROTTLING) && !defined(__GENKSYMS__)
+	union {
+		struct {
+			ANDROID_KABI_RESERVE(1);
+		};
+		struct {
+			struct throtl_data *td;
+		};
+	};
+#else
 	ANDROID_KABI_RESERVE(1);
+#endif
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);

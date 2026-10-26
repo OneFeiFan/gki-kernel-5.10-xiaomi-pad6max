@@ -363,7 +363,7 @@ struct rt_rq;
 extern struct list_head task_groups;
 
 struct cfs_bandwidth {
-#ifdef CONFIG_CFS_BANDWIDTH
+#if defined(CONFIG_CFS_BANDWIDTH) && !defined(__GENKSYMS__)
 	raw_spinlock_t		lock;
 	ktime_t			period;
 	u64			quota;
@@ -603,7 +603,7 @@ struct cfs_rq {
 	struct list_head	leaf_cfs_rq_list;
 	struct task_group	*tg;	/* group that "owns" this runqueue */
 
-#ifdef CONFIG_CFS_BANDWIDTH
+#if defined(CONFIG_CFS_BANDWIDTH) && !defined(__GENKSYMS__)
 	int			runtime_enabled;
 	s64			runtime_remaining;
 
@@ -2011,7 +2011,7 @@ extern void init_dl_inactive_task_timer(struct sched_dl_entity *dl_se);
 #define RATIO_SHIFT		8
 #define MAX_BW_BITS		(64 - BW_SHIFT)
 #define MAX_BW			((1ULL << MAX_BW_BITS) - 1)
-unsigned long to_ratio(u64 period, u64 runtime);
+u64 to_ratio(u64 period, u64 runtime);
 
 extern void init_entity_runnable_average(struct sched_entity *se);
 extern void post_init_entity_util_avg(struct task_struct *p);

@@ -2366,6 +2366,8 @@ static inline void *skb_pull_inline(struct sk_buff *skb, unsigned int len)
 	return unlikely(len > skb->len) ? NULL : __skb_pull(skb, len);
 }
 
+void *skb_pull_data(struct sk_buff *skb, size_t len);
+
 void *__pskb_pull_tail(struct sk_buff *skb, int delta);
 
 static inline void *__pskb_pull(struct sk_buff *skb, unsigned int len)
@@ -3735,6 +3737,18 @@ skb_header_pointer(const struct sk_buff *skb, int offset, int len, void *buffer)
 				    skb_headlen(skb), buffer);
 }
 
+/* Variant of skb_header_pointer() where @offset is user-controlled
+ * and potentially negative.
+ */
+static inline void * __must_check
+skb_header_pointer_careful(const struct sk_buff *skb, int offset,
+			   int len, void *buffer)
+{
+	if (unlikely(offset < 0 && -offset > skb_headroom(skb)))
+		return NULL;
+	return skb_header_pointer(skb, offset, len, buffer);
+}
+
 /**
  *	skb_needs_linearize - check if we need to linearize a given skb
  *			      depending on the given device features.
@@ -4246,9 +4260,6 @@ static inline void skb_set_nfct(struct sk_buff *skb, unsigned long nfct)
 
 #ifdef CONFIG_SKB_EXTENSIONS
 enum skb_ext_id {
-#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
-	SKB_EXT_BRIDGE_NF,
-#endif
 #ifdef CONFIG_XFRM
 	SKB_EXT_SEC_PATH,
 #endif
@@ -4257,6 +4268,14 @@ enum skb_ext_id {
 #endif
 #if IS_ENABLED(CONFIG_MPTCP)
 	SKB_EXT_MPTCP,
+#endif
+#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER) && !defined(__GENKSYMS__)
+	/*
+	 * Appended instead of at the top so the existing extension ids keep
+	 * their values; genksyms does not see it, so SKB_EXT_NUM stays 3
+	 * there and struct skb_ext keeps its stock CRC.
+	 */
+	SKB_EXT_BRIDGE_NF,
 #endif
 	SKB_EXT_NUM, /* must be last */
 };

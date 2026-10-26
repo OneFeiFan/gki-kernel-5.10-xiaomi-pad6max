@@ -42,7 +42,7 @@ static DEFINE_IDR(zram_index_idr);
 static DEFINE_MUTEX(zram_index_mutex);
 
 static int zram_major;
-static const char *default_compressor = "lzo-rle";
+static const char *default_compressor = CONFIG_ZRAM_DEF_COMP;
 
 /* Module params (documentation at end) */
 static unsigned int num_devices = 1;
@@ -1023,6 +1023,15 @@ static ssize_t comp_algorithm_store(struct device *dev,
 	sz = strlen(compressor);
 	if (sz > 0 && compressor[sz - 1] == '\n')
 		compressor[sz - 1] = 0x00;
+
+#ifdef CONFIG_ZRAM_DEF_COMP_LZ4KD
+	/*
+	 * The vendor init scripts hard-code "lz4"; map it to lz4kd so the
+	 * Huawei backend selected at build time is actually used.
+	 */
+	if (!strcmp(compressor, "lz4"))
+		strlcpy(compressor, "lz4kd", sizeof(compressor));
+#endif
 
 	if (!zcomp_available_algorithm(compressor))
 		return -EINVAL;

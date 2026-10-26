@@ -109,7 +109,7 @@ static void sctp_get_local_addr_list(struct net *net)
 	for_each_netdev_rcu(net, dev) {
 		list_for_each(pos, &sctp_address_families) {
 			af = list_entry(pos, struct sctp_af, list);
-			af->copy_addrlist(&net->sctp.local_addr_list, dev);
+			af->copy_addrlist(&net_sctp(net).local_addr_list, dev);
 		}
 	}
 	rcu_read_unlock();
@@ -121,7 +121,7 @@ static void sctp_free_local_addr_list(struct net *net)
 	struct sctp_sockaddr_entry *addr;
 	struct list_head *pos, *temp;
 
-	list_for_each_safe(pos, temp, &net->sctp.local_addr_list) {
+	list_for_each_safe(pos, temp, &net_sctp(net).local_addr_list) {
 		addr = list_entry(pos, struct sctp_sockaddr_entry, list);
 		list_del(pos);
 		kfree(addr);
@@ -137,7 +137,7 @@ int sctp_copy_local_addr_list(struct net *net, struct sctp_bind_addr *bp,
 	int error = 0;
 
 	rcu_read_lock();
-	list_for_each_entry_rcu(addr, &net->sctp.local_addr_list, list) {
+	list_for_each_entry_rcu(addr, &net_sctp(net).local_addr_list, list) {
 		if (!addr->valid)
 			continue;
 		if (!sctp_in_scope(net, &addr->a, scope))
@@ -624,15 +624,16 @@ static void sctp_v4_ecn_capable(struct sock *sk)
 
 static void sctp_addr_wq_timeout_handler(struct timer_list *t)
 {
-	struct net *net = from_timer(net, t, sctp.addr_wq_timer);
+	struct netns_sctp *sctp = from_timer(sctp, t, addr_wq_timer);
+	struct net *net = sctp->net;
 	struct sctp_sockaddr_entry *addrw, *temp;
 	struct sctp_sock *sp;
 
-	spin_lock_bh(&net->sctp.addr_wq_lock);
+	spin_lock_bh(&net_sctp(net).addr_wq_lock);
 
-	list_for_each_entry_safe(addrw, temp, &net->sctp.addr_waitq, list) {
+	list_for_each_entry_safe(addrw, temp, &net_sctp(net).addr_waitq, list) {
 		pr_debug("%s: the first ent in wq:%p is addr:%pISc for cmd:%d at "
-			 "entry:%p\n", __func__, &net->sctp.addr_waitq, &addrw->a.sa,
+			 "entry:%p\n", __func__, &net_sctp(net).addr_waitq, &addrw->a.sa,
 			 addrw->state, addrw);
 
 #if IS_ENABLED(CONFIG_IPV6)
@@ -656,12 +657,12 @@ static void sctp_addr_wq_timeout_handler(struct timer_list *t)
 
 				timeo_val = jiffies;
 				timeo_val += msecs_to_jiffies(SCTP_ADDRESS_TICK_DELAY);
-				mod_timer(&net->sctp.addr_wq_timer, timeo_val);
+				mod_timer(&net_sctp(net).addr_wq_timer, timeo_val);
 				break;
 			}
 		}
 #endif
-		list_for_each_entry(sp, &net->sctp.auto_asconf_splist, auto_asconf_list) {
+		list_for_each_entry(sp, &net_sctp(net).auto_asconf_splist, auto_asconf_list) {
 			struct sock *sk;
 
 			sk = sctp_opt2sk(sp);
@@ -679,7 +680,7 @@ free_next:
 		list_del(&addrw->list);
 		kfree(addrw);
 	}
-	spin_unlock_bh(&net->sctp.addr_wq_lock);
+	spin_unlock_bh(&net_sctp(net).addr_wq_lock);
 }
 
 static void sctp_free_addr_wq(struct net *net)
@@ -687,13 +688,13 @@ static void sctp_free_addr_wq(struct net *net)
 	struct sctp_sockaddr_entry *addrw;
 	struct sctp_sockaddr_entry *temp;
 
-	spin_lock_bh(&net->sctp.addr_wq_lock);
-	del_timer(&net->sctp.addr_wq_timer);
-	list_for_each_entry_safe(addrw, temp, &net->sctp.addr_waitq, list) {
+	spin_lock_bh(&net_sctp(net).addr_wq_lock);
+	del_timer(&net_sctp(net).addr_wq_timer);
+	list_for_each_entry_safe(addrw, temp, &net_sctp(net).addr_waitq, list) {
 		list_del(&addrw->list);
 		kfree(addrw);
 	}
-	spin_unlock_bh(&net->sctp.addr_wq_lock);
+	spin_unlock_bh(&net_sctp(net).addr_wq_lock);
 }
 
 /* lookup the entry for the same address in the addr_waitq
@@ -704,7 +705,7 @@ static struct sctp_sockaddr_entry *sctp_addr_wq_lookup(struct net *net,
 {
 	struct sctp_sockaddr_entry *addrw;
 
-	list_for_each_entry(addrw, &net->sctp.addr_waitq, list) {
+	list_for_each_entry(addrw, &net_sctp(net).addr_waitq, list) {
 		if (addrw->a.sa.sa_family != addr->a.sa.sa_family)
 			continue;
 		if (addrw->a.sa.sa_family == AF_INET) {
@@ -731,40 +732,40 @@ void sctp_addr_wq_mgmt(struct net *net, struct sctp_sockaddr_entry *addr, int cm
 	 * new address after a couple of addition and deletion of that address
 	 */
 
-	spin_lock_bh(&net->sctp.addr_wq_lock);
+	spin_lock_bh(&net_sctp(net).addr_wq_lock);
 	/* Offsets existing events in addr_wq */
 	addrw = sctp_addr_wq_lookup(net, addr);
 	if (addrw) {
 		if (addrw->state != cmd) {
 			pr_debug("%s: offsets existing entry for %d, addr:%pISc "
 				 "in wq:%p\n", __func__, addrw->state, &addrw->a.sa,
-				 &net->sctp.addr_waitq);
+				 &net_sctp(net).addr_waitq);
 
 			list_del(&addrw->list);
 			kfree(addrw);
 		}
-		spin_unlock_bh(&net->sctp.addr_wq_lock);
+		spin_unlock_bh(&net_sctp(net).addr_wq_lock);
 		return;
 	}
 
 	/* OK, we have to add the new address to the wait queue */
 	addrw = kmemdup(addr, sizeof(struct sctp_sockaddr_entry), GFP_ATOMIC);
 	if (addrw == NULL) {
-		spin_unlock_bh(&net->sctp.addr_wq_lock);
+		spin_unlock_bh(&net_sctp(net).addr_wq_lock);
 		return;
 	}
 	addrw->state = cmd;
-	list_add_tail(&addrw->list, &net->sctp.addr_waitq);
+	list_add_tail(&addrw->list, &net_sctp(net).addr_waitq);
 
 	pr_debug("%s: add new entry for cmd:%d, addr:%pISc in wq:%p\n",
-		 __func__, addrw->state, &addrw->a.sa, &net->sctp.addr_waitq);
+		 __func__, addrw->state, &addrw->a.sa, &net_sctp(net).addr_waitq);
 
-	if (!timer_pending(&net->sctp.addr_wq_timer)) {
+	if (!timer_pending(&net_sctp(net).addr_wq_timer)) {
 		timeo_val = jiffies;
 		timeo_val += msecs_to_jiffies(SCTP_ADDRESS_TICK_DELAY);
-		mod_timer(&net->sctp.addr_wq_timer, timeo_val);
+		mod_timer(&net_sctp(net).addr_wq_timer, timeo_val);
 	}
-	spin_unlock_bh(&net->sctp.addr_wq_lock);
+	spin_unlock_bh(&net_sctp(net).addr_wq_lock);
 }
 
 /* Event handler for inet address addition/deletion events.
@@ -789,16 +790,16 @@ static int sctp_inetaddr_event(struct notifier_block *this, unsigned long ev,
 			addr->a.v4.sin_family = AF_INET;
 			addr->a.v4.sin_addr.s_addr = ifa->ifa_local;
 			addr->valid = 1;
-			spin_lock_bh(&net->sctp.local_addr_lock);
-			list_add_tail_rcu(&addr->list, &net->sctp.local_addr_list);
+			spin_lock_bh(&net_sctp(net).local_addr_lock);
+			list_add_tail_rcu(&addr->list, &net_sctp(net).local_addr_list);
 			sctp_addr_wq_mgmt(net, addr, SCTP_ADDR_NEW);
-			spin_unlock_bh(&net->sctp.local_addr_lock);
+			spin_unlock_bh(&net_sctp(net).local_addr_lock);
 		}
 		break;
 	case NETDEV_DOWN:
-		spin_lock_bh(&net->sctp.local_addr_lock);
+		spin_lock_bh(&net_sctp(net).local_addr_lock);
 		list_for_each_entry_safe(addr, temp,
-					&net->sctp.local_addr_list, list) {
+					&net_sctp(net).local_addr_list, list) {
 			if (addr->a.sa.sa_family == AF_INET &&
 					addr->a.v4.sin_addr.s_addr ==
 					ifa->ifa_local) {
@@ -809,7 +810,7 @@ static int sctp_inetaddr_event(struct notifier_block *this, unsigned long ev,
 				break;
 			}
 		}
-		spin_unlock_bh(&net->sctp.local_addr_lock);
+		spin_unlock_bh(&net_sctp(net).local_addr_lock);
 		if (found)
 			kfree_rcu(addr, rcu);
 		break;
@@ -830,12 +831,12 @@ static int sctp_ctl_sock_init(struct net *net)
 	if (sctp_get_pf_specific(PF_INET6))
 		family = PF_INET6;
 
-	err = inet_ctl_sock_create(&net->sctp.ctl_sock, family,
+	err = inet_ctl_sock_create(&net_sctp(net).ctl_sock, family,
 				   SOCK_SEQPACKET, IPPROTO_SCTP, net);
 
 	/* If IPv6 socket could not be created, try the IPv4 socket */
 	if (err < 0 && family == PF_INET6)
-		err = inet_ctl_sock_create(&net->sctp.ctl_sock, AF_INET,
+		err = inet_ctl_sock_create(&net_sctp(net).ctl_sock, AF_INET,
 					   SOCK_SEQPACKET, IPPROTO_SCTP,
 					   net);
 
@@ -1131,15 +1132,15 @@ int sctp_register_pf(struct sctp_pf *pf, sa_family_t family)
 
 static inline int init_sctp_mibs(struct net *net)
 {
-	net->sctp.sctp_statistics = alloc_percpu(struct sctp_mib);
-	if (!net->sctp.sctp_statistics)
+	net_sctp(net).sctp_statistics = alloc_percpu(struct sctp_mib);
+	if (!net_sctp(net).sctp_statistics)
 		return -ENOMEM;
 	return 0;
 }
 
 static inline void cleanup_sctp_mibs(struct net *net)
 {
-	free_percpu(net->sctp.sctp_statistics);
+	free_percpu(net_sctp(net).sctp_statistics);
 }
 
 static void sctp_v4_pf_init(void)
@@ -1178,12 +1179,18 @@ static void sctp_v4_protosw_exit(void)
 
 static int sctp_v4_add_protocol(void)
 {
+	int ret;
+
 	/* Register notifier for inet address additions/deletions. */
-	register_inetaddr_notifier(&sctp_inetaddr_notifier);
+	ret = register_inetaddr_notifier(&sctp_inetaddr_notifier);
+	if (ret)
+		return ret;
 
 	/* Register SCTP with inet layer.  */
-	if (inet_add_protocol(&sctp_protocol, IPPROTO_SCTP) < 0)
+	if (inet_add_protocol(&sctp_protocol, IPPROTO_SCTP) < 0) {
+		unregister_inetaddr_notifier(&sctp_inetaddr_notifier);
 		return -EAGAIN;
+	}
 
 	return 0;
 }
@@ -1198,97 +1205,102 @@ static int __net_init sctp_defaults_init(struct net *net)
 {
 	int status;
 
+	/* Keep struct net layout identical to a kernel without IP_SCTP. */
+	BUILD_BUG_ON(offsetof(struct net, sctp_ext) != 688);
+	BUILD_BUG_ON(sizeof(struct net) != 4672);
+
+	net->sctp_ext = kzalloc(sizeof(*net->sctp_ext), GFP_KERNEL);
+	if (!net->sctp_ext)
+		return -ENOMEM;
+	net->sctp_ext->net = net;
+
 	/*
 	 * 14. Suggested SCTP Protocol Parameter Values
 	 */
 	/* The following protocol parameters are RECOMMENDED:  */
 	/* RTO.Initial              - 3  seconds */
-	net->sctp.rto_initial			= SCTP_RTO_INITIAL;
+	net_sctp(net).rto_initial			= SCTP_RTO_INITIAL;
 	/* RTO.Min                  - 1  second */
-	net->sctp.rto_min	 		= SCTP_RTO_MIN;
+	net_sctp(net).rto_min	 		= SCTP_RTO_MIN;
 	/* RTO.Max                 -  60 seconds */
-	net->sctp.rto_max 			= SCTP_RTO_MAX;
+	net_sctp(net).rto_max 			= SCTP_RTO_MAX;
 	/* RTO.Alpha                - 1/8 */
-	net->sctp.rto_alpha			= SCTP_RTO_ALPHA;
+	net_sctp(net).rto_alpha			= SCTP_RTO_ALPHA;
 	/* RTO.Beta                 - 1/4 */
-	net->sctp.rto_beta			= SCTP_RTO_BETA;
+	net_sctp(net).rto_beta			= SCTP_RTO_BETA;
 
 	/* Valid.Cookie.Life        - 60  seconds */
-	net->sctp.valid_cookie_life		= SCTP_DEFAULT_COOKIE_LIFE;
+	net_sctp(net).valid_cookie_life		= SCTP_DEFAULT_COOKIE_LIFE;
 
 	/* Whether Cookie Preservative is enabled(1) or not(0) */
-	net->sctp.cookie_preserve_enable 	= 1;
+	net_sctp(net).cookie_preserve_enable 	= 1;
 
 	/* Default sctp sockets to use md5 as their hmac alg */
 #if defined (CONFIG_SCTP_DEFAULT_COOKIE_HMAC_MD5)
-	net->sctp.sctp_hmac_alg			= "md5";
+	net_sctp(net).sctp_hmac_alg			= "md5";
 #elif defined (CONFIG_SCTP_DEFAULT_COOKIE_HMAC_SHA1)
-	net->sctp.sctp_hmac_alg			= "sha1";
+	net_sctp(net).sctp_hmac_alg			= "sha1";
 #else
-	net->sctp.sctp_hmac_alg			= NULL;
+	net_sctp(net).sctp_hmac_alg			= NULL;
 #endif
 
 	/* Max.Burst		    - 4 */
-	net->sctp.max_burst			= SCTP_DEFAULT_MAX_BURST;
+	net_sctp(net).max_burst			= SCTP_DEFAULT_MAX_BURST;
 
 	/* Disable of Primary Path Switchover by default */
-	net->sctp.ps_retrans = SCTP_PS_RETRANS_MAX;
+	net_sctp(net).ps_retrans = SCTP_PS_RETRANS_MAX;
 
 	/* Enable pf state by default */
-	net->sctp.pf_enable = 1;
+	net_sctp(net).pf_enable = 1;
 
 	/* Ignore pf exposure feature by default */
-	net->sctp.pf_expose = SCTP_PF_EXPOSE_UNSET;
+	net_sctp(net).pf_expose = SCTP_PF_EXPOSE_UNSET;
 
 	/* Association.Max.Retrans  - 10 attempts
 	 * Path.Max.Retrans         - 5  attempts (per destination address)
 	 * Max.Init.Retransmits     - 8  attempts
 	 */
-	net->sctp.max_retrans_association	= 10;
-	net->sctp.max_retrans_path		= 5;
-	net->sctp.max_retrans_init		= 8;
+	net_sctp(net).max_retrans_association	= 10;
+	net_sctp(net).max_retrans_path		= 5;
+	net_sctp(net).max_retrans_init		= 8;
 
 	/* Sendbuffer growth	    - do per-socket accounting */
-	net->sctp.sndbuf_policy			= 0;
+	net_sctp(net).sndbuf_policy			= 0;
 
 	/* Rcvbuffer growth	    - do per-socket accounting */
-	net->sctp.rcvbuf_policy			= 0;
+	net_sctp(net).rcvbuf_policy			= 0;
 
 	/* HB.interval              - 30 seconds */
-	net->sctp.hb_interval			= SCTP_DEFAULT_TIMEOUT_HEARTBEAT;
+	net_sctp(net).hb_interval			= SCTP_DEFAULT_TIMEOUT_HEARTBEAT;
 
 	/* delayed SACK timeout */
-	net->sctp.sack_timeout			= SCTP_DEFAULT_TIMEOUT_SACK;
+	net_sctp(net).sack_timeout			= SCTP_DEFAULT_TIMEOUT_SACK;
 
 	/* Disable ADDIP by default. */
-	net->sctp.addip_enable = 0;
-	net->sctp.addip_noauth = 0;
-	net->sctp.default_auto_asconf = 0;
+	net_sctp(net).addip_enable = 0;
+	net_sctp(net).addip_noauth = 0;
+	net_sctp(net).default_auto_asconf = 0;
 
 	/* Enable PR-SCTP by default. */
-	net->sctp.prsctp_enable = 1;
+	net_sctp(net).prsctp_enable = 1;
 
 	/* Disable RECONF by default. */
-	net->sctp.reconf_enable = 0;
+	net_sctp(net).reconf_enable = 0;
 
 	/* Disable AUTH by default. */
-	net->sctp.auth_enable = 0;
+	net_sctp(net).auth_enable = 0;
 
 	/* Enable ECN by default. */
-	net->sctp.ecn_enable = 1;
+	net_sctp(net).ecn_enable = 1;
 
 	/* Set SCOPE policy to enabled */
-	net->sctp.scope_policy = SCTP_SCOPE_POLICY_ENABLE;
+	net_sctp(net).scope_policy = SCTP_SCOPE_POLICY_ENABLE;
 
 	/* Set the default rwnd update threshold */
-	net->sctp.rwnd_upd_shift = SCTP_DEFAULT_RWND_SHIFT;
+	net_sctp(net).rwnd_upd_shift = SCTP_DEFAULT_RWND_SHIFT;
 
 	/* Initialize maximum autoclose timeout. */
-	net->sctp.max_autoclose		= INT_MAX / HZ;
-
-	status = sctp_sysctl_net_register(net);
-	if (status)
-		goto err_sysctl_register;
+	net_sctp(net).max_autoclose		= INT_MAX / HZ;
 
 	/* Allocate and initialise sctp mibs.  */
 	status = init_sctp_mibs(net);
@@ -1305,16 +1317,16 @@ static int __net_init sctp_defaults_init(struct net *net)
 	sctp_dbg_objcnt_init(net);
 
 	/* Initialize the local address list. */
-	INIT_LIST_HEAD(&net->sctp.local_addr_list);
-	spin_lock_init(&net->sctp.local_addr_lock);
+	INIT_LIST_HEAD(&net_sctp(net).local_addr_list);
+	spin_lock_init(&net_sctp(net).local_addr_lock);
 	sctp_get_local_addr_list(net);
 
 	/* Initialize the address event list */
-	INIT_LIST_HEAD(&net->sctp.addr_waitq);
-	INIT_LIST_HEAD(&net->sctp.auto_asconf_splist);
-	spin_lock_init(&net->sctp.addr_wq_lock);
-	net->sctp.addr_wq_timer.expires = 0;
-	timer_setup(&net->sctp.addr_wq_timer, sctp_addr_wq_timeout_handler, 0);
+	INIT_LIST_HEAD(&net_sctp(net).addr_waitq);
+	INIT_LIST_HEAD(&net_sctp(net).auto_asconf_splist);
+	spin_lock_init(&net_sctp(net).addr_wq_lock);
+	net_sctp(net).addr_wq_timer.expires = 0;
+	timer_setup(&net_sctp(net).addr_wq_timer, sctp_addr_wq_timeout_handler, 0);
 
 	return 0;
 
@@ -1323,8 +1335,8 @@ err_init_proc:
 	cleanup_sctp_mibs(net);
 #endif
 err_init_mibs:
-	sctp_sysctl_net_unregister(net);
-err_sysctl_register:
+	kfree(net->sctp_ext);
+	net->sctp_ext = NULL;
 	return status;
 }
 
@@ -1336,10 +1348,12 @@ static void __net_exit sctp_defaults_exit(struct net *net)
 
 #ifdef CONFIG_PROC_FS
 	remove_proc_subtree("sctp", net->proc_net);
-	net->sctp.proc_net_sctp = NULL;
+	net_sctp(net).proc_net_sctp = NULL;
 #endif
 	cleanup_sctp_mibs(net);
-	sctp_sysctl_net_unregister(net);
+
+	kfree(net->sctp_ext);
+	net->sctp_ext = NULL;
 }
 
 static struct pernet_operations sctp_defaults_ops = {
@@ -1353,16 +1367,27 @@ static int __net_init sctp_ctrlsock_init(struct net *net)
 
 	/* Initialize the control inode/socket for handling OOTB packets.  */
 	status = sctp_ctl_sock_init(net);
-	if (status)
+	if (status) {
 		pr_err("Failed to initialize the SCTP control sock\n");
+		return status;
+	}
+
+	status = sctp_sysctl_net_register(net);
+	if (status) {
+		inet_ctl_sock_destroy(net_sctp(net).ctl_sock);
+		net_sctp(net).ctl_sock = NULL;
+	}
 
 	return status;
 }
 
 static void __net_exit sctp_ctrlsock_exit(struct net *net)
 {
+	sctp_sysctl_net_unregister(net);
+
 	/* Free the control endpoint.  */
-	inet_ctl_sock_destroy(net->sctp.ctl_sock);
+	inet_ctl_sock_destroy(net_sctp(net).ctl_sock);
+	net_sctp(net).ctl_sock = NULL;
 }
 
 static struct pernet_operations sctp_ctrlsock_ops = {

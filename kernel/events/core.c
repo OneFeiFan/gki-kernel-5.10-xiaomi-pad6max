@@ -681,8 +681,15 @@ perf_cgroup_match(struct perf_event *event)
 	struct perf_event_context *ctx = event->ctx;
 	struct perf_cpu_context *cpuctx = __get_cpu_context(ctx);
 
+	/* Keep the stock struct perf_event / perf_event_context layout. */
+	BUILD_BUG_ON(offsetof(struct perf_event, cgrp_high) != 732);
+	BUILD_BUG_ON(offsetof(struct perf_event, cgrp_low) != 772);
+	BUILD_BUG_ON(offsetof(struct perf_event_context, nr_cgroups) != 244);
+	BUILD_BUG_ON(sizeof(struct perf_event) != 1024);
+	BUILD_BUG_ON(sizeof(struct perf_event_context) != 272);
+
 	/* @event doesn't care about cgroup */
-	if (!event->cgrp)
+	if (!get_cgrp(event))
 		return true;
 
 	/* wants specific cgroup scope but @cpuctx isn't associated with any */
@@ -696,25 +703,25 @@ perf_cgroup_match(struct perf_event *event)
 	 * case), it's a match.
 	 */
 	return cgroup_is_descendant(cpuctx->cgrp->css.cgroup,
-				    event->cgrp->css.cgroup);
+				    get_cgrp(event)->css.cgroup);
 }
 
 static inline void perf_detach_cgroup(struct perf_event *event)
 {
-	css_put(&event->cgrp->css);
-	event->cgrp = NULL;
+	css_put(&get_cgrp(event)->css);
+	set_cgrp(event, NULL);
 }
 
 static inline int is_cgroup_event(struct perf_event *event)
 {
-	return event->cgrp != NULL;
+	return get_cgrp(event) != NULL;
 }
 
 static inline u64 perf_cgroup_event_time(struct perf_event *event)
 {
 	struct perf_cgroup_info *t;
 
-	t = per_cpu_ptr(event->cgrp->info, event->cpu);
+	t = per_cpu_ptr(get_cgrp(event)->info, event->cpu);
 	return t->time;
 }
 
@@ -759,8 +766,8 @@ static inline void update_cgrp_time_from_event(struct perf_event *event)
 	/*
 	 * Do not update time when cgroup is not active
 	 */
-	if (cgroup_is_descendant(cgrp->css.cgroup, event->cgrp->css.cgroup))
-		__update_cgrp_time(event->cgrp);
+	if (cgroup_is_descendant(cgrp->css.cgroup, get_cgrp(event)->css.cgroup))
+		__update_cgrp_time(get_cgrp(event));
 }
 
 static inline void
@@ -964,14 +971,14 @@ static inline int perf_cgroup_connect(int fd, struct perf_event *event,
 		goto out;
 
 	cgrp = container_of(css, struct perf_cgroup, css);
-	event->cgrp = cgrp;
+	set_cgrp(event, cgrp);
 
 	/*
 	 * all events in a group must monitor
 	 * the same cgroup because a task belongs
 	 * to only one perf cgroup at a time
 	 */
-	if (group_leader && group_leader->cgrp != cgrp) {
+	if (group_leader && get_cgrp(group_leader) != cgrp) {
 		perf_detach_cgroup(event);
 		ret = -EINVAL;
 	}
@@ -984,7 +991,7 @@ static inline void
 perf_cgroup_set_shadow_time(struct perf_event *event, u64 now)
 {
 	struct perf_cgroup_info *t;
-	t = per_cpu_ptr(event->cgrp->info, event->cpu);
+	t = per_cpu_ptr(get_cgrp(event)->info, event->cpu);
 	event->shadow_ctx_time = now - t->timestamp;
 }
 
@@ -1011,7 +1018,7 @@ perf_cgroup_event_enable(struct perf_event *event, struct perf_event_context *ct
 	if (ctx->is_active && !cpuctx->cgrp) {
 		struct perf_cgroup *cgrp = perf_cgroup_from_task(current, ctx);
 
-		if (cgroup_is_descendant(cgrp->css.cgroup, event->cgrp->css.cgroup))
+		if (cgroup_is_descendant(cgrp->css.cgroup, get_cgrp(event)->css.cgroup))
 			cpuctx->cgrp = cgrp;
 	}
 
@@ -1614,15 +1621,15 @@ perf_event_groups_less(struct perf_event *left, struct perf_event *right)
 		return false;
 
 #ifdef CONFIG_CGROUP_PERF
-	if (left->cgrp != right->cgrp) {
-		if (!left->cgrp || !left->cgrp->css.cgroup) {
+	if (get_cgrp(left) != get_cgrp(right)) {
+		if (!get_cgrp(left) || !get_cgrp(left)->css.cgroup) {
 			/*
 			 * Left has no cgroup but right does, no cgroups come
 			 * first.
 			 */
 			return true;
 		}
-		if (!right->cgrp || !right->cgrp->css.cgroup) {
+		if (!get_cgrp(right) || !get_cgrp(right)->css.cgroup) {
 			/*
 			 * Right has no cgroup but left does, no cgroups come
 			 * first.
@@ -1630,7 +1637,7 @@ perf_event_groups_less(struct perf_event *left, struct perf_event *right)
 			return false;
 		}
 		/* Two dissimilar cgroups, order by id. */
-		if (left->cgrp->css.cgroup->kn->id < right->cgrp->css.cgroup->kn->id)
+		if (get_cgrp(left)->css.cgroup->kn->id < get_cgrp(right)->css.cgroup->kn->id)
 			return true;
 
 		return false;
@@ -1744,8 +1751,8 @@ perf_event_groups_first(struct perf_event_groups *groups, int cpu,
 		}
 #ifdef CONFIG_CGROUP_PERF
 		node_cgrp_id = 0;
-		if (node_event->cgrp && node_event->cgrp->css.cgroup)
-			node_cgrp_id = node_event->cgrp->css.cgroup->kn->id;
+		if (get_cgrp(node_event) && get_cgrp(node_event)->css.cgroup)
+			node_cgrp_id = get_cgrp(node_event)->css.cgroup->kn->id;
 
 		if (cgrp_id < node_cgrp_id) {
 			node = node->rb_left;
@@ -1780,11 +1787,11 @@ perf_event_groups_next(struct perf_event *event)
 		return NULL;
 
 #ifdef CONFIG_CGROUP_PERF
-	if (event->cgrp && event->cgrp->css.cgroup)
-		curr_cgrp_id = event->cgrp->css.cgroup->kn->id;
+	if (get_cgrp(event) && get_cgrp(event)->css.cgroup)
+		curr_cgrp_id = get_cgrp(event)->css.cgroup->kn->id;
 
-	if (next->cgrp && next->cgrp->css.cgroup)
-		next_cgrp_id = next->cgrp->css.cgroup->kn->id;
+	if (get_cgrp(next) && get_cgrp(next)->css.cgroup)
+		next_cgrp_id = get_cgrp(next)->css.cgroup->kn->id;
 
 	if (curr_cgrp_id != next_cgrp_id)
 		return NULL;
@@ -2036,18 +2043,6 @@ list_del_event(struct perf_event *event, struct perf_event_context *ctx)
 	if (event->group_leader == event)
 		del_event_from_groups(event, ctx);
 
-	/*
-	 * If event was in error state, then keep it
-	 * that way, otherwise bogus counts will be
-	 * returned on read(). The only way to get out
-	 * of error state is by explicit re-enabling
-	 * of the event
-	 */
-	if (event->state > PERF_EVENT_STATE_OFF) {
-		perf_cgroup_event_disable(event, ctx);
-		perf_event_set_state(event, PERF_EVENT_STATE_OFF);
-	}
-
 	ctx->generation++;
 }
 
@@ -2064,14 +2059,13 @@ perf_aux_output_match(struct perf_event *event, struct perf_event *aux_event)
 }
 
 static void put_event(struct perf_event *event);
-static void event_sched_out(struct perf_event *event,
-			    struct perf_cpu_context *cpuctx,
-			    struct perf_event_context *ctx);
+static void __event_disable(struct perf_event *event,
+			    struct perf_event_context *ctx,
+			    enum perf_event_state state);
 
 static void perf_put_aux_event(struct perf_event *event)
 {
 	struct perf_event_context *ctx = event->ctx;
-	struct perf_cpu_context *cpuctx = __get_cpu_context(ctx);
 	struct perf_event *iter;
 
 	/*
@@ -2100,8 +2094,7 @@ static void perf_put_aux_event(struct perf_event *event)
 		 * state so that we don't try to schedule it again. Note
 		 * that perf_event_enable() will clear the ERROR status.
 		 */
-		event_sched_out(iter, cpuctx, ctx);
-		perf_event_set_state(event, PERF_EVENT_STATE_ERROR);
+		__event_disable(iter, ctx, PERF_EVENT_STATE_ERROR);
 	}
 }
 
@@ -2155,19 +2148,32 @@ static inline struct list_head *get_event_list(struct perf_event *event)
 	return event->attr.pinned ? &ctx->pinned_active : &ctx->flexible_active;
 }
 
-/*
- * Events that have PERF_EV_CAP_SIBLING require being part of a group and
- * cannot exist on their own, schedule them out and move them into the ERROR
- * state. Also see _perf_event_enable(), it will not be able to recover
- * this ERROR state.
- */
-static inline void perf_remove_sibling_event(struct perf_event *event)
+/* @sibling must already be unlinked from its old leader's sibling_list. */
+static void perf_promote_sibling_to_leader(struct perf_event *sibling,
+					   struct perf_event_context *ctx,
+					   int group_caps)
 {
-	struct perf_event_context *ctx = event->ctx;
-	struct perf_cpu_context *cpuctx = __get_cpu_context(ctx);
+	/*
+	 * Events that have PERF_EV_CAP_SIBLING require being part of
+	 * a group and cannot exist on their own, schedule them out
+	 * and move them into the ERROR state. Also see
+	 * _perf_event_enable(), it will not be able to recover this
+	 * ERROR state.
+	 */
+	if (sibling->event_caps & PERF_EV_CAP_SIBLING)
+		__event_disable(sibling, ctx, PERF_EVENT_STATE_ERROR);
 
-	event_sched_out(event, cpuctx, ctx);
-	perf_event_set_state(event, PERF_EVENT_STATE_ERROR);
+	sibling->group_leader = sibling;
+	sibling->group_caps = group_caps;
+
+	if (sibling->attach_state & PERF_ATTACH_CONTEXT) {
+		add_event_to_groups(sibling, ctx);
+
+		if (sibling->state == PERF_EVENT_STATE_ACTIVE)
+			list_add_tail(&sibling->active_list, get_event_list(sibling));
+	}
+
+	perf_event__header_size(sibling);
 }
 
 static void perf_group_detach(struct perf_event *event)
@@ -2193,8 +2199,9 @@ static void perf_group_detach(struct perf_event *event)
 	 */
 	if (leader != event) {
 		list_del_init(&event->sibling_list);
-		event->group_leader->nr_siblings--;
-		event->group_leader->group_generation++;
+		leader->nr_siblings--;
+		leader->group_generation++;
+		perf_promote_sibling_to_leader(event, ctx, event->event_caps);
 		goto out;
 	}
 
@@ -2204,25 +2211,14 @@ static void perf_group_detach(struct perf_event *event)
 	 * to whatever list we are on.
 	 */
 	list_for_each_entry_safe(sibling, tmp, &event->sibling_list, sibling_list) {
-
-		if (sibling->event_caps & PERF_EV_CAP_SIBLING)
-			perf_remove_sibling_event(sibling);
-
-		sibling->group_leader = sibling;
 		list_del_init(&sibling->sibling_list);
 
 		/* Inherit group flags from the previous leader */
-		sibling->group_caps = event->group_caps;
-
-		if (!RB_EMPTY_NODE(&event->group_node)) {
-			add_event_to_groups(sibling, event->ctx);
-
-			if (sibling->state == PERF_EVENT_STATE_ACTIVE)
-				list_add_tail(&sibling->active_list, get_event_list(sibling));
-		}
+		perf_promote_sibling_to_leader(sibling, ctx, event->group_caps);
 
 		WARN_ON_ONCE(sibling->ctx != event->ctx);
 	}
+	event->nr_siblings = 0;
 
 out:
 	for_each_sibling_event(tmp, leader)
@@ -2351,6 +2347,7 @@ __perf_remove_from_context(struct perf_event *event,
 			   struct perf_event_context *ctx,
 			   void *info)
 {
+	enum perf_event_state state = PERF_EVENT_STATE_OFF;
 	unsigned long flags = (unsigned long)info;
 
 	if (ctx->is_active & EVENT_TIME) {
@@ -2358,7 +2355,8 @@ __perf_remove_from_context(struct perf_event *event,
 		update_cgrp_time_from_cpuctx(cpuctx);
 	}
 
-	event_sched_out(event, cpuctx, ctx);
+	__event_disable(event, ctx, state);
+
 	if (flags & DETACH_GROUP)
 		perf_group_detach(event);
 	list_del_event(event, ctx);
@@ -2410,6 +2408,16 @@ static void perf_remove_from_context(struct perf_event *event, unsigned long fla
 	}
 }
 
+static void __event_disable(struct perf_event *event,
+			    struct perf_event_context *ctx,
+			    enum perf_event_state state)
+{
+	event_sched_out(event, __get_cpu_context(ctx), ctx);
+	if (event->state > PERF_EVENT_STATE_OFF)
+		perf_cgroup_event_disable(event, ctx);
+	perf_event_set_state(event, min(event->state, state));
+}
+
 /*
  * Cross CPU call to disable a performance event
  */
@@ -2426,13 +2434,18 @@ static void __perf_event_disable(struct perf_event *event,
 		update_cgrp_time_from_event(event);
 	}
 
+	/*
+	 * When disabling a group leader, the whole group becomes ineligible
+	 * to run, so schedule out the full group.
+	 */
 	if (event == event->group_leader)
 		group_sched_out(event, cpuctx, ctx);
-	else
-		event_sched_out(event, cpuctx, ctx);
 
-	perf_event_set_state(event, PERF_EVENT_STATE_OFF);
-	perf_cgroup_event_disable(event, ctx);
+	/*
+	 * But only mark the leader OFF; the siblings will remain
+	 * INACTIVE.
+	 */
+	__event_disable(event, ctx, PERF_EVENT_STATE_OFF);
 }
 
 /*
@@ -2818,7 +2831,7 @@ static int  __perf_install_in_context(void *info)
 		 */
 		struct perf_cgroup *cgrp = perf_cgroup_from_task(current, ctx);
 		reprogram = cgroup_is_descendant(cgrp->css.cgroup,
-					event->cgrp->css.cgroup);
+					get_cgrp(event)->css.cgroup);
 	}
 #endif
 

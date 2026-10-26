@@ -65,7 +65,7 @@ static int sctp_snmp_seq_show(struct seq_file *seq, void *v)
 	memset(buff, 0, sizeof(unsigned long) * SCTP_MIB_MAX);
 
 	snmp_get_cpu_field_batch(buff, sctp_snmp_list,
-				 net->sctp.sctp_statistics);
+				 net_sctp(net).sctp_statistics);
 	for (i = 0; sctp_snmp_list[i].name; i++)
 		seq_printf(seq, "%-32s\t%ld\n", sctp_snmp_list[i].name,
 						buff[i]);
@@ -375,25 +375,25 @@ static const struct seq_operations sctp_remaddr_ops = {
 /* Set up the proc fs entry for the SCTP protocol. */
 int __net_init sctp_proc_init(struct net *net)
 {
-	net->sctp.proc_net_sctp = proc_net_mkdir(net, "sctp", net->proc_net);
-	if (!net->sctp.proc_net_sctp)
+	net_sctp(net).proc_net_sctp = proc_net_mkdir(net, "sctp", net->proc_net);
+	if (!net_sctp(net).proc_net_sctp)
 		return -ENOMEM;
-	if (!proc_create_net_single("snmp", 0444, net->sctp.proc_net_sctp,
+	if (!proc_create_net_single("snmp", 0444, net_sctp(net).proc_net_sctp,
 			 sctp_snmp_seq_show, NULL))
 		goto cleanup;
-	if (!proc_create_net("eps", 0444, net->sctp.proc_net_sctp,
+	if (!proc_create_net("eps", 0444, net_sctp(net).proc_net_sctp,
 			&sctp_eps_ops, sizeof(struct seq_net_private)))
 		goto cleanup;
-	if (!proc_create_net("assocs", 0444, net->sctp.proc_net_sctp,
+	if (!proc_create_net("assocs", 0444, net_sctp(net).proc_net_sctp,
 			&sctp_assoc_ops, sizeof(struct sctp_ht_iter)))
 		goto cleanup;
-	if (!proc_create_net("remaddr", 0444, net->sctp.proc_net_sctp,
+	if (!proc_create_net("remaddr", 0444, net_sctp(net).proc_net_sctp,
 			&sctp_remaddr_ops, sizeof(struct sctp_ht_iter)))
 		goto cleanup;
 	return 0;
 
 cleanup:
 	remove_proc_subtree("sctp", net->proc_net);
-	net->sctp.proc_net_sctp = NULL;
+	net_sctp(net).proc_net_sctp = NULL;
 	return -ENOMEM;
 }

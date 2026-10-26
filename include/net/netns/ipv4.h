@@ -106,9 +106,6 @@ struct netns_ipv4 {
 	/* Shall we try to damage output packets if routing dev changes? */
 	int sysctl_ip_dynaddr;
 	int sysctl_ip_early_demux;
-#ifdef CONFIG_NET_L3_MASTER_DEV
-	int sysctl_raw_l3mdev_accept;
-#endif
 	int sysctl_tcp_early_demux;
 	int sysctl_udp_early_demux;
 
@@ -116,9 +113,6 @@ struct netns_ipv4 {
 
 	int sysctl_fwmark_reflect;
 	int sysctl_tcp_fwmark_accept;
-#ifdef CONFIG_NET_L3_MASTER_DEV
-	int sysctl_tcp_l3mdev_accept;
-#endif
 	int sysctl_tcp_mtu_probing;
 	int sysctl_tcp_mtu_probe_floor;
 	int sysctl_tcp_base_mss;
@@ -175,6 +169,15 @@ struct netns_ipv4 {
 	int sysctl_tcp_comp_sack_nr;
 	unsigned long sysctl_tcp_comp_sack_delay_ns;
 	unsigned long sysctl_tcp_comp_sack_slack_ns;
+#if defined(CONFIG_NET_L3_MASTER_DEV) && !defined(__GENKSYMS__)
+	/*
+	 * Stock-layout anchor: these live in the 32-byte alignment hole
+	 * before tcp_death_row (64-byte aligned), so no offset moves.
+	 */
+	int sysctl_raw_l3mdev_accept;
+	int sysctl_tcp_l3mdev_accept;
+	int sysctl_udp_l3mdev_accept;
+#endif
 	struct inet_timewait_death_row tcp_death_row;
 	int sysctl_max_syn_backlog;
 	int sysctl_tcp_fastopen;
@@ -188,10 +191,6 @@ struct netns_ipv4 {
 
 	int sysctl_udp_wmem_min;
 	int sysctl_udp_rmem_min;
-
-#ifdef CONFIG_NET_L3_MASTER_DEV
-	int sysctl_udp_l3mdev_accept;
-#endif
 
 	int sysctl_igmp_max_memberships;
 	int sysctl_igmp_max_msf;

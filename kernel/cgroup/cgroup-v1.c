@@ -1218,6 +1218,16 @@ static int cgroup1_root_to_use(struct fs_context *fc)
 	if (!root)
 		return -ENOMEM;
 
+	{
+		struct cgroup_ext *ext = kzalloc(sizeof(*ext), GFP_KERNEL);
+
+		if (!ext) {
+			kfree(root);
+			return -ENOMEM;
+		}
+		cgroup_set_ext(&root->cgrp, ext);
+	}
+
 	ctx->root = root;
 	init_cgroup_root(ctx);
 

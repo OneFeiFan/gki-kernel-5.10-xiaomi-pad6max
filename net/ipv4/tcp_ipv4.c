@@ -78,6 +78,7 @@
 #include <linux/inetdevice.h>
 #include <linux/btf_ids.h>
 
+#include <crypto/algapi.h>
 #include <crypto/hash.h>
 #include <linux/scatterlist.h>
 
@@ -762,7 +763,7 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 
 
 		genhash = tcp_v4_md5_hash_skb(newhash, key, NULL, skb);
-		if (genhash || memcmp(hash_location, newhash, 16) != 0)
+		if (genhash || crypto_memneq(hash_location, newhash, 16))
 			goto out;
 
 	}
@@ -1020,7 +1021,7 @@ static int tcp_v4_send_synack(const struct sock *sk, struct dst_entry *dst,
  */
 static void tcp_v4_reqsk_destructor(struct request_sock *req)
 {
-	kfree(rcu_dereference_protected(inet_rsk(req)->ireq_opt, 1));
+	kfree_rcu(rcu_dereference_protected(inet_rsk(req)->ireq_opt, 1), rcu);
 }
 
 #ifdef CONFIG_TCP_MD5SIG
@@ -1442,7 +1443,7 @@ static bool tcp_v4_inbound_md5_hash(const struct sock *sk,
 				      hash_expected,
 				      NULL, skb);
 
-	if (genhash || memcmp(hash_location, newhash, 16) != 0) {
+	if (genhash || crypto_memneq(hash_location, newhash, 16)) {
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPMD5FAILURE);
 		net_info_ratelimited("MD5 Hash failed for (%pI4, %d)->(%pI4, %d)%s L3 index %d\n",
 				     &iph->saddr, ntohs(th->source),
@@ -2861,6 +2862,7 @@ static void __net_exit tcp_sk_exit(struct net *net)
 static int __net_init tcp_sk_init(struct net *net)
 {
 	int res, cpu, cnt;
+	struct tcp_plb_net_context *ctx, *init_ctx;
 
 	net->ipv4.tcp_sk = alloc_percpu(struct sock *);
 	if (!net->ipv4.tcp_sk)
@@ -2956,6 +2958,18 @@ static int __net_init tcp_sk_init(struct net *net)
 	spin_lock_init(&net->ipv4.tcp_fastopen_ctx_lock);
 	net->ipv4.sysctl_tcp_fastopen_blackhole_timeout = 0;
 	atomic_set(&net->ipv4.tfo_active_disable_times, 0);
+
+	ctx = tcp_get_plb_ctx(net);
+	init_ctx = tcp_get_plb_ctx(&init_net);
+
+	if (ctx && init_ctx && !net_eq(net, &init_net))
+	{
+		ctx->params.sysctl_tcp_plb_enabled = init_ctx->params.sysctl_tcp_plb_enabled; 
+		ctx->params.sysctl_tcp_plb_idle_rehash_rounds = init_ctx->params.sysctl_tcp_plb_idle_rehash_rounds; 
+		ctx->params.sysctl_tcp_plb_rehash_rounds = init_ctx->params.sysctl_tcp_plb_rehash_rounds; 
+		ctx->params.sysctl_tcp_plb_suspend_rto_sec = init_ctx->params.sysctl_tcp_plb_suspend_rto_sec; 
+		ctx->params.sysctl_tcp_plb_cong_thresh = init_ctx->params.sysctl_tcp_plb_cong_thresh; 
+	}
 
 	/* Reno is always built in */
 	if (!net_eq(net, &init_net) &&

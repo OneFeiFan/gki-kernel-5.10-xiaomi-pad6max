@@ -89,46 +89,48 @@ static struct ctl_table sctp_table[] = {
 #define SCTP_PF_RETRANS_IDX    2
 #define SCTP_PS_RETRANS_IDX    3
 
+static struct netns_sctp sctp_sysctl_defaults;
+
 static struct ctl_table sctp_net_table[] = {
 	[SCTP_RTO_MIN_IDX] = {
 		.procname	= "rto_min",
-		.data		= &init_net.sctp.rto_min,
+		.data		= &sctp_sysctl_defaults.rto_min,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_sctp_do_rto_min,
 		.extra1         = SYSCTL_ONE,
-		.extra2         = &init_net.sctp.rto_max
+		.extra2         = &sctp_sysctl_defaults.rto_max
 	},
 	[SCTP_RTO_MAX_IDX] =  {
 		.procname	= "rto_max",
-		.data		= &init_net.sctp.rto_max,
+		.data		= &sctp_sysctl_defaults.rto_max,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_sctp_do_rto_max,
-		.extra1         = &init_net.sctp.rto_min,
+		.extra1         = &sctp_sysctl_defaults.rto_min,
 		.extra2         = &timer_max
 	},
 	[SCTP_PF_RETRANS_IDX] = {
 		.procname	= "pf_retrans",
-		.data		= &init_net.sctp.pf_retrans,
+		.data		= &sctp_sysctl_defaults.pf_retrans,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= SYSCTL_ZERO,
-		.extra2		= &init_net.sctp.ps_retrans,
+		.extra2		= &sctp_sysctl_defaults.ps_retrans,
 	},
 	[SCTP_PS_RETRANS_IDX] = {
 		.procname	= "ps_retrans",
-		.data		= &init_net.sctp.ps_retrans,
+		.data		= &sctp_sysctl_defaults.ps_retrans,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &init_net.sctp.pf_retrans,
+		.extra1		= &sctp_sysctl_defaults.pf_retrans,
 		.extra2		= &ps_retrans_max,
 	},
 	{
 		.procname	= "rto_initial",
-		.data		= &init_net.sctp.rto_initial,
+		.data		= &sctp_sysctl_defaults.rto_initial,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -137,7 +139,7 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "rto_alpha_exp_divisor",
-		.data		= &init_net.sctp.rto_alpha,
+		.data		= &sctp_sysctl_defaults.rto_alpha,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_sctp_do_alpha_beta,
@@ -146,7 +148,7 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "rto_beta_exp_divisor",
-		.data		= &init_net.sctp.rto_beta,
+		.data		= &sctp_sysctl_defaults.rto_beta,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_sctp_do_alpha_beta,
@@ -155,7 +157,7 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "max_burst",
-		.data		= &init_net.sctp.max_burst,
+		.data		= &sctp_sysctl_defaults.max_burst,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -164,21 +166,21 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "cookie_preserve_enable",
-		.data		= &init_net.sctp.cookie_preserve_enable,
+		.data		= &sctp_sysctl_defaults.cookie_preserve_enable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "cookie_hmac_alg",
-		.data		= &init_net.sctp.sctp_hmac_alg,
+		.data		= &sctp_sysctl_defaults.sctp_hmac_alg,
 		.maxlen		= 8,
 		.mode		= 0644,
 		.proc_handler	= proc_sctp_do_hmac_alg,
 	},
 	{
 		.procname	= "valid_cookie_life",
-		.data		= &init_net.sctp.valid_cookie_life,
+		.data		= &sctp_sysctl_defaults.valid_cookie_life,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -187,7 +189,7 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "sack_timeout",
-		.data		= &init_net.sctp.sack_timeout,
+		.data		= &sctp_sysctl_defaults.sack_timeout,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -196,7 +198,7 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "hb_interval",
-		.data		= &init_net.sctp.hb_interval,
+		.data		= &sctp_sysctl_defaults.hb_interval,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -205,7 +207,7 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "association_max_retrans",
-		.data		= &init_net.sctp.max_retrans_association,
+		.data		= &sctp_sysctl_defaults.max_retrans_association,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -214,7 +216,7 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "path_max_retrans",
-		.data		= &init_net.sctp.max_retrans_path,
+		.data		= &sctp_sysctl_defaults.max_retrans_path,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -223,7 +225,7 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "max_init_retransmits",
-		.data		= &init_net.sctp.max_retrans_init,
+		.data		= &sctp_sysctl_defaults.max_retrans_init,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -232,77 +234,77 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "sndbuf_policy",
-		.data		= &init_net.sctp.sndbuf_policy,
+		.data		= &sctp_sysctl_defaults.sndbuf_policy,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "rcvbuf_policy",
-		.data		= &init_net.sctp.rcvbuf_policy,
+		.data		= &sctp_sysctl_defaults.rcvbuf_policy,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "default_auto_asconf",
-		.data		= &init_net.sctp.default_auto_asconf,
+		.data		= &sctp_sysctl_defaults.default_auto_asconf,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "addip_enable",
-		.data		= &init_net.sctp.addip_enable,
+		.data		= &sctp_sysctl_defaults.addip_enable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "addip_noauth_enable",
-		.data		= &init_net.sctp.addip_noauth,
+		.data		= &sctp_sysctl_defaults.addip_noauth,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "prsctp_enable",
-		.data		= &init_net.sctp.prsctp_enable,
+		.data		= &sctp_sysctl_defaults.prsctp_enable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "reconf_enable",
-		.data		= &init_net.sctp.reconf_enable,
+		.data		= &sctp_sysctl_defaults.reconf_enable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "auth_enable",
-		.data		= &init_net.sctp.auth_enable,
+		.data		= &sctp_sysctl_defaults.auth_enable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_sctp_do_auth,
 	},
 	{
 		.procname	= "intl_enable",
-		.data		= &init_net.sctp.intl_enable,
+		.data		= &sctp_sysctl_defaults.intl_enable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "ecn_enable",
-		.data		= &init_net.sctp.ecn_enable,
+		.data		= &sctp_sysctl_defaults.ecn_enable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "addr_scope_policy",
-		.data		= &init_net.sctp.scope_policy,
+		.data		= &sctp_sysctl_defaults.scope_policy,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -311,7 +313,7 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "rwnd_update_shift",
-		.data		= &init_net.sctp.rwnd_upd_shift,
+		.data		= &sctp_sysctl_defaults.rwnd_upd_shift,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec_minmax,
@@ -320,7 +322,7 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "max_autoclose",
-		.data		= &init_net.sctp.max_autoclose,
+		.data		= &sctp_sysctl_defaults.max_autoclose,
 		.maxlen		= sizeof(unsigned long),
 		.mode		= 0644,
 		.proc_handler	= &proc_doulongvec_minmax,
@@ -329,14 +331,14 @@ static struct ctl_table sctp_net_table[] = {
 	},
 	{
 		.procname	= "pf_enable",
-		.data		= &init_net.sctp.pf_enable,
+		.data		= &sctp_sysctl_defaults.pf_enable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "pf_expose",
-		.data		= &init_net.sctp.pf_expose,
+		.data		= &sctp_sysctl_defaults.pf_expose,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -350,8 +352,7 @@ static struct ctl_table sctp_net_table[] = {
 static int proc_sctp_do_hmac_alg(struct ctl_table *ctl, int write,
 				 void *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct net *net = container_of(ctl->data, struct net,
-				       sctp.sctp_hmac_alg);
+	struct net *net = container_of(ctl->data, struct netns_sctp, sctp_hmac_alg)->net;
 	struct ctl_table tbl;
 	bool changed = false;
 	char *none = "none";
@@ -364,7 +365,7 @@ static int proc_sctp_do_hmac_alg(struct ctl_table *ctl, int write,
 		tbl.data = tmp;
 		tbl.maxlen = sizeof(tmp);
 	} else {
-		tbl.data = net->sctp.sctp_hmac_alg ? : none;
+		tbl.data = net_sctp(net).sctp_hmac_alg ? : none;
 		tbl.maxlen = strlen(tbl.data);
 	}
 
@@ -372,18 +373,18 @@ static int proc_sctp_do_hmac_alg(struct ctl_table *ctl, int write,
 	if (write && ret == 0) {
 #ifdef CONFIG_CRYPTO_MD5
 		if (!strncmp(tmp, "md5", 3)) {
-			net->sctp.sctp_hmac_alg = "md5";
+			net_sctp(net).sctp_hmac_alg = "md5";
 			changed = true;
 		}
 #endif
 #ifdef CONFIG_CRYPTO_SHA1
 		if (!strncmp(tmp, "sha1", 4)) {
-			net->sctp.sctp_hmac_alg = "sha1";
+			net_sctp(net).sctp_hmac_alg = "sha1";
 			changed = true;
 		}
 #endif
 		if (!strncmp(tmp, "none", 4)) {
-			net->sctp.sctp_hmac_alg = NULL;
+			net_sctp(net).sctp_hmac_alg = NULL;
 			changed = true;
 		}
 		if (!changed)
@@ -396,7 +397,7 @@ static int proc_sctp_do_hmac_alg(struct ctl_table *ctl, int write,
 static int proc_sctp_do_rto_min(struct ctl_table *ctl, int write,
 				void *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct net *net = container_of(ctl->data, struct net, sctp.rto_min);
+	struct net *net = container_of(ctl->data, struct netns_sctp, rto_min)->net;
 	unsigned int min = *(unsigned int *) ctl->extra1;
 	unsigned int max = *(unsigned int *) ctl->extra2;
 	struct ctl_table tbl;
@@ -408,14 +409,14 @@ static int proc_sctp_do_rto_min(struct ctl_table *ctl, int write,
 	if (write)
 		tbl.data = &new_value;
 	else
-		tbl.data = &net->sctp.rto_min;
+		tbl.data = &net_sctp(net).rto_min;
 
 	ret = proc_dointvec(&tbl, write, buffer, lenp, ppos);
 	if (write && ret == 0) {
 		if (new_value > max || new_value < min)
 			return -EINVAL;
 
-		net->sctp.rto_min = new_value;
+		net_sctp(net).rto_min = new_value;
 	}
 
 	return ret;
@@ -424,7 +425,7 @@ static int proc_sctp_do_rto_min(struct ctl_table *ctl, int write,
 static int proc_sctp_do_rto_max(struct ctl_table *ctl, int write,
 				void *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct net *net = container_of(ctl->data, struct net, sctp.rto_max);
+	struct net *net = container_of(ctl->data, struct netns_sctp, rto_max)->net;
 	unsigned int min = *(unsigned int *) ctl->extra1;
 	unsigned int max = *(unsigned int *) ctl->extra2;
 	struct ctl_table tbl;
@@ -436,14 +437,14 @@ static int proc_sctp_do_rto_max(struct ctl_table *ctl, int write,
 	if (write)
 		tbl.data = &new_value;
 	else
-		tbl.data = &net->sctp.rto_max;
+		tbl.data = &net_sctp(net).rto_max;
 
 	ret = proc_dointvec(&tbl, write, buffer, lenp, ppos);
 	if (write && ret == 0) {
 		if (new_value > max || new_value < min)
 			return -EINVAL;
 
-		net->sctp.rto_max = new_value;
+		net_sctp(net).rto_max = new_value;
 	}
 
 	return ret;
@@ -462,7 +463,7 @@ static int proc_sctp_do_alpha_beta(struct ctl_table *ctl, int write,
 static int proc_sctp_do_auth(struct ctl_table *ctl, int write,
 			     void *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct net *net = container_of(ctl->data, struct net, sctp.auth_enable);
+	struct net *net = container_of(ctl->data, struct netns_sctp, auth_enable)->net;
 	struct ctl_table tbl;
 	int new_value, ret;
 
@@ -472,13 +473,13 @@ static int proc_sctp_do_auth(struct ctl_table *ctl, int write,
 	if (write)
 		tbl.data = &new_value;
 	else
-		tbl.data = &net->sctp.auth_enable;
+		tbl.data = &net_sctp(net).auth_enable;
 
 	ret = proc_dointvec(&tbl, write, buffer, lenp, ppos);
 	if (write && ret == 0) {
-		struct sock *sk = net->sctp.ctl_sock;
+		struct sock *sk = net_sctp(net).ctl_sock;
 
-		net->sctp.auth_enable = new_value;
+		net_sctp(net).auth_enable = new_value;
 		/* Update the value in the control socket */
 		lock_sock(sk);
 		sctp_sk(sk)->ep->auth_enable = new_value;
@@ -498,15 +499,15 @@ int sctp_sysctl_net_register(struct net *net)
 		return -ENOMEM;
 
 	for (i = 0; table[i].data; i++)
-		table[i].data += (char *)(&net->sctp) - (char *)&init_net.sctp;
+		table[i].data += (char *)(net->sctp_ext) - (char *)&sctp_sysctl_defaults;
 
-	table[SCTP_RTO_MIN_IDX].extra2 = &net->sctp.rto_max;
-	table[SCTP_RTO_MAX_IDX].extra1 = &net->sctp.rto_min;
-	table[SCTP_PF_RETRANS_IDX].extra2 = &net->sctp.ps_retrans;
-	table[SCTP_PS_RETRANS_IDX].extra1 = &net->sctp.pf_retrans;
+	table[SCTP_RTO_MIN_IDX].extra2 = &net_sctp(net).rto_max;
+	table[SCTP_RTO_MAX_IDX].extra1 = &net_sctp(net).rto_min;
+	table[SCTP_PF_RETRANS_IDX].extra2 = &net_sctp(net).ps_retrans;
+	table[SCTP_PS_RETRANS_IDX].extra1 = &net_sctp(net).pf_retrans;
 
-	net->sctp.sysctl_header = register_net_sysctl(net, "net/sctp", table);
-	if (net->sctp.sysctl_header == NULL) {
+	net_sctp(net).sysctl_header = register_net_sysctl(net, "net/sctp", table);
+	if (net_sctp(net).sysctl_header == NULL) {
 		kfree(table);
 		return -ENOMEM;
 	}
@@ -515,11 +516,16 @@ int sctp_sysctl_net_register(struct net *net)
 
 void sctp_sysctl_net_unregister(struct net *net)
 {
+	struct ctl_table_header *header = net_sctp(net).sysctl_header;
 	struct ctl_table *table;
 
-	table = net->sctp.sysctl_header->ctl_table_arg;
-	unregister_net_sysctl_table(net->sctp.sysctl_header);
+	if (!header)
+		return;
+
+	table = header->ctl_table_arg;
+	unregister_net_sysctl_table(header);
 	kfree(table);
+	net_sctp(net).sysctl_header = NULL;
 }
 
 static struct ctl_table_header *sctp_sysctl_header;

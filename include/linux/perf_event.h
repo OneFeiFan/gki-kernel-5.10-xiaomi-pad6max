@@ -725,11 +725,22 @@ struct perf_event {
 	/* mmap bits */
 	struct mutex			mmap_mutex;
 	atomic_t			mmap_count;
+#if defined(CONFIG_CGROUP_PERF) && !defined(__GENKSYMS__)
+	/*
+	 * The stock layout has a 4-byte hole here.  Store the high half of
+	 * the cgroup pointer in it so the layout stays ABI-compatible; the
+	 * low half lives in the hole after rcu_pending.  See get_cgrp().
+	 */
+	u32				cgrp_high;
+#endif
 
 	struct perf_buffer		*rb;
 	struct list_head		rb_entry;
 	unsigned long			rcu_batches;
 	int				rcu_pending;
+#if defined(CONFIG_CGROUP_PERF) && !defined(__GENKSYMS__)
+	u32				cgrp_low;
+#endif
 
 	/* poll related */
 	wait_queue_head_t		waitq;
@@ -774,10 +785,6 @@ struct perf_event {
 #endif
 #endif
 
-#ifdef CONFIG_CGROUP_PERF
-	struct perf_cgroup		*cgrp; /* cgroup event is attach to */
-#endif
-
 #ifdef CONFIG_SECURITY
 	void *security;
 #endif
@@ -785,6 +792,29 @@ struct perf_event {
 #endif /* CONFIG_PERF_EVENTS */
 };
 
+#if defined(CONFIG_CGROUP_PERF) && !defined(__GENKSYMS__)
+/*
+ * struct perf_event has no free pointer-sized field.  Keep the cgroup
+ * pointer split across the two 4-byte holes of the stock layout (after
+ * mmap_count and rcu_pending) so that both the runtime layout and the
+ * genksyms CRCs stay identical to a kernel built without CGROUP_PERF.
+ */
+static inline struct perf_cgroup *get_cgrp(const struct perf_event *event)
+{
+	u64 val = ((u64)READ_ONCE(event->cgrp_high) << 32) |
+		  READ_ONCE(event->cgrp_low);
+
+	return (struct perf_cgroup *)(unsigned long)val;
+}
+
+static inline void set_cgrp(struct perf_event *event, struct perf_cgroup *cgrp)
+{
+	u64 val = (u64)(unsigned long)cgrp;
+
+	WRITE_ONCE(event->cgrp_high, (u32)(val >> 32));
+	WRITE_ONCE(event->cgrp_low, (u32)val);
+}
+#endif
 
 struct perf_event_groups {
 	struct rb_root	tree;
@@ -846,7 +876,8 @@ struct perf_event_context {
 	u64				parent_gen;
 	u64				generation;
 	int				pin_count;
-#ifdef CONFIG_CGROUP_PERF
+#if defined(CONFIG_CGROUP_PERF) && !defined(__GENKSYMS__)
+	/* Fills the 4-byte hole before task_ctx_data: layout stays stock. */
 	int				nr_cgroups;	 /* cgroup evts */
 #endif
 	void				*task_ctx_data; /* pmu specific data */
@@ -873,7 +904,8 @@ struct perf_cpu_context {
 	ktime_t				hrtimer_interval;
 	unsigned int			hrtimer_active;
 
-#ifdef CONFIG_CGROUP_PERF
+#if defined(CONFIG_CGROUP_PERF) && !defined(__GENKSYMS__)
+	/* Internal type: no exported symbol uses struct perf_cpu_context. */
 	struct perf_cgroup		*cgrp;
 	struct list_head		cgrp_cpuctx_entry;
 #endif

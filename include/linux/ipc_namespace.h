@@ -20,7 +20,7 @@ struct ipc_ids {
 	struct idr ipcs_idr;
 	int max_idx;
 	int last_idx;	/* For wrap around detection */
-#ifdef CONFIG_CHECKPOINT_RESTORE
+#if defined(CONFIG_CHECKPOINT_RESTORE) && !defined(__GENKSYMS__)
 	int next_id;
 #endif
 	struct rhashtable key_ht;

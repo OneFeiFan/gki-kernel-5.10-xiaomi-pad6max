@@ -572,7 +572,7 @@ void elv_unregister(struct elevator_type *e)
 }
 EXPORT_SYMBOL_GPL(elv_unregister);
 
-int elevator_switch_mq(struct request_queue *q,
+static int elevator_switch_mq(struct request_queue *q,
 			      struct elevator_type *new_e)
 {
 	int ret;
@@ -675,10 +675,15 @@ void elevator_init_mq(struct request_queue *q)
 	if (unlikely(q->elevator))
 		return;
 
-	if (!q->required_elevator_features)
+	if (IS_ENABLED(CONFIG_MQ_ADIOS_DEFAULT)) {
+		e = elevator_get(q, "adios", false);
+		if (!e && !q->required_elevator_features)
+			e = elevator_get_default(q);
+	} else if (!q->required_elevator_features) {
 		e = elevator_get_default(q);
-	else
+	} else {
 		e = elevator_get_by_features(q);
+	}
 	if (!e)
 		return;
 
@@ -704,7 +709,7 @@ void elevator_init_mq(struct request_queue *q)
  * need for the new one. this way we have a chance of going back to the old
  * one, if the new one fails init for some reason.
  */
-static int elevator_switch(struct request_queue *q, struct elevator_type *new_e)
+int elevator_switch(struct request_queue *q, struct elevator_type *new_e)
 {
 	int err;
 
