@@ -1,0 +1,59 @@
+From deac269407598569637eda97c81fa057aba436ed Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Wed, 28 Oct 2026 01:02:51 +0800
+Subject: [PATCH] docs: point patch instructions at the restructured repo
+
+The repository now keeps the kernel tree under source/ and the patch
+series at the top level. Update the build and patch sections so the
+README does not tell readers to look for patches/ inside the source
+tree.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ README.gki-docker.md | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/README.gki-docker.md b/README.gki-docker.md
+index 0d3410484..0df658f37 100644
+--- a/README.gki-docker.md
++++ b/README.gki-docker.md
+@@ -51,6 +51,8 @@ OUT_DIR=~/kernel-sources/out-zram \
+ bash build/build.sh -j12
+ ```
+ 
++本仓库的 `source/` 就是上面的 `common/` 内核树；构建工具 `build/`、`prebuilts/` 需要按 AOSP 的方式另外准备。
++
+ 构建使用 ThinLTO。`out-zram` 是沿用下来的目录名，不代表构建内容只和 zram 有关。
+ 
+ 构建后跑两项硬门禁：
+@@ -120,21 +122,23 @@ grep -H . /sys/block/sda/queue/scheduler
+ 
+ ## 补丁
+ 
+-`patches/` 放的是本项目相对 5.10.272 的全部改动，不包含 AOSP 历史。
++补丁放在仓库顶层的 `patches/`（不在本源码目录内），只包含本项目相对 5.10.272 的改动。
+ 
+ - 基线：`a1eed2e9c`（`Merge 5.10.272 into android12-5.10-lts`）
+ - 顺序：`patches/series`
+ - 分类：`00-platform`、`01-container`、`02-wine`、`03-memory`、`04-security`、`05-storage`、`06-network`、`07-block`、`08-syscalls`、`09-docs`
+ - 索引：`patches/README.md`
+ 
+-应用方式：
++在 AOSP 基线树上应用（把 `PATCHES` 指向本仓库的 `patches/`）：
+ 
+ ```sh
++cd common
+ git checkout a1eed2e9c
+-while read p; do git am "patches/$p"; done < patches/series
++PATCHES=/path/to/gki-yudi/patches
++while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series"
+ ```
+ 
+-`patches/` 目录本身不在补丁里；应用完 series 后的代码树应与当前提交前的源码树一致。
++`patches/` 目录本身不在补丁里；应用完 series 后的源码树应与本仓库的 `source/` 一致。
+ 
+ ## 已知限制
+ 
+-- 
+2.34.1
+

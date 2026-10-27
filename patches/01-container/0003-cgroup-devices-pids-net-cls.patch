@@ -1,0 +1,837 @@
+From cf9e012568eb7f651228d1a42518a8861d4e3b6d Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Sun, 25 Oct 2026 17:20:07 +0800
+Subject: [PATCH] GKI: enable cgroup device/pids/net_cls with ABI-safe ext
+ split
+
+Port post-KMI cgroup controllers without changing the layout of struct
+css_set / struct cgroup or the genksyms CRCs of the stock 5.10 KMI:
+
+- move devices/pids/perf_event/net_cls to the end of cgroup_subsys.h
+- keep the stock 7-controller arrays in css_set/cgroup; store the extra
+  controllers in dynamically allocated ext_css_set/cgroup_ext
+- stash the ext pointers in the natural holes at offsets 276/2748 and
+  hide the new fields and helpers from genksyms
+- hide the ext enum entries from genksyms as well, so the enum values
+  and array bounds seen by genksyms match the stock kernel exactly
+- enable CGROUP_DEVICE, CGROUP_PIDS and CGROUP_NET_CLASSID
+
+CGROUP_PERF stays disabled: it adds fields to struct perf_event (which
+is reachable from task_struct) and changes ~1000 KMI CRCs.  The Docker
+check-config.sh only lists it as optional.
+
+Validated on device: 355/355 vendor_boot module CRCs match, all 7298
+symbol CRCs are identical to the bootable baseline, kernel boots,
+KernelSU LKM works, Droidspaces Debian 13 container starts.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ arch/arm64/configs/gki_defconfig |   7 ++
+ include/linux/cgroup-defs.h      | 150 +++++++++++++++++++++++++++++-
+ include/linux/cgroup.h           |   4 +-
+ include/linux/cgroup_subsys.h    |  47 ++++++----
+ kernel/cgroup/cgroup-v1.c        |  10 ++
+ kernel/cgroup/cgroup.c           | 155 +++++++++++++++++++++----------
+ kernel/cgroup/debug.c            |   4 +-
+ kernel/cgroup/pids.c             |   4 +-
+ 8 files changed, 306 insertions(+), 75 deletions(-)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index ab784d932..8fc4cbe85 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -711,3 +711,10 @@ CONFIG_IP_SET=y
+ CONFIG_IP_SET_HASH_IP=y
+ CONFIG_IP_SET_HASH_NET=y
+ CONFIG_NETFILTER_XT_SET=y
++CONFIG_CGROUP_DEVICE=y
++CONFIG_CGROUP_PIDS=y
++# CONFIG_CGROUP_PERF is not set
++# CGROUP_PERF adds fields to struct perf_event (reachable from task_struct),
++# which changes the CRCs of ~1000 exported symbols and breaks vendor modules.
++# Docker's check-config.sh lists CGROUP_PERF as optional only.
++CONFIG_CGROUP_NET_CLASSID=y
+diff --git a/include/linux/cgroup-defs.h b/include/linux/cgroup-defs.h
+index 3ee42f154..18d504ad6 100644
+--- a/include/linux/cgroup-defs.h
++++ b/include/linux/cgroup-defs.h
+@@ -21,6 +21,7 @@
+ #include <linux/workqueue.h>
+ #include <linux/bpf-cgroup.h>
+ #include <linux/psi_types.h>
++#include <linux/stddef.h>
+ 
+ #ifdef CONFIG_CGROUPS
+ 
+@@ -46,6 +47,29 @@ enum cgroup_subsys_id {
+ };
+ #undef SUBSYS
+ 
++/*
++ * Allow enabling controllers that were added after the 5.10 KMI without
++ * changing the layout of struct css_set / struct cgroup: the first
++ * CGROUP_SUBSYS_MAIN_COUNT ids keep the original in-struct arrays, while
++ * the extra controllers are stored in separately allocated ext structures.
++ * CGROUP_SUBSYS_MAIN_COUNT must equal the stock (7) controller count, so
++ * CGROUP_SUBSYS_EXT_SLOTS must match the number of enabled ext controllers
++ * (devices, pids, net_cls = 3).  CGROUP_PERF is not enabled: it adds fields
++ * to struct perf_event, which changes the KMI CRCs of most exported symbols.
++ */
++#define CGROUP_SUBSYS_EXT_SLOTS		3
++/*
++ * genksyms folds array bounds and the enum cgroup_subsys_id members into the
++ * symbol CRCs.  To keep those identical to the stock 5.10 kernel, genksyms
++ * must see the stock enum (the ext controllers are hidden from it in
++ * cgroup_subsys.h) and the stock array bound tokens, hence this split.
++ */
++#ifdef __GENKSYMS__
++#define CGROUP_SUBSYS_MAIN_COUNT	CGROUP_SUBSYS_COUNT
++#else
++#define CGROUP_SUBSYS_MAIN_COUNT	(CGROUP_SUBSYS_COUNT - CGROUP_SUBSYS_EXT_SLOTS)
++#endif
++
+ /* bits in struct cgroup_subsys_state flags field */
+ enum {
+ 	CSS_NO_REF	= (1 << 0), /* no reference counting for this css */
+@@ -199,7 +223,7 @@ struct css_set {
+ 	 * immutable after creation apart from the init_css_set during
+ 	 * subsystem registration (at boot time).
+ 	 */
+-	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_COUNT];
++	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_MAIN_COUNT];
+ 
+ 	/* reference count */
+ 	refcount_t refcount;
+@@ -239,7 +263,7 @@ struct css_set {
+ 	 * ->subsys[ssid]->cgroup->e_csets[ssid] and provides a way to
+ 	 * iterate through all css's attached to a given cgroup.
+ 	 */
+-	struct list_head e_cset_node[CGROUP_SUBSYS_COUNT];
++	struct list_head e_cset_node[CGROUP_SUBSYS_MAIN_COUNT];
+ 
+ 	/* all threaded csets whose ->dom_cset points to this cset */
+ 	struct list_head threaded_csets;
+@@ -287,6 +311,14 @@ struct ext_css_set {
+ 
+ 	struct list_head mg_src_preload_node;
+ 	struct list_head mg_dst_preload_node;
++
++	/*
++	 * Extension slots for cgroup subsystems added after the 5.10 KMI.
++	 * struct css_set is the first member, so these arrays can be reached
++	 * from any struct css_set * with a plain cast.
++	 */
++	struct cgroup_subsys_state *ext_subsys[CGROUP_SUBSYS_EXT_SLOTS];
++	struct list_head ext_e_cset_node[CGROUP_SUBSYS_EXT_SLOTS];
+ };
+ 
+ struct cgroup_base_stat {
+@@ -410,6 +442,11 @@ struct cgroup {
+ 
+ 	int nr_threaded_children;	/* # of live threaded child cgroups */
+ 
++#ifndef __GENKSYMS__
++	/* low 32 bits of the extension slots pointer (ABI-neutral padding) */
++	u32 ext_lo;
++#endif
++
+ 	struct kernfs_node *kn;		/* cgroup kernfs entry */
+ 	struct cgroup_file procs_file;	/* handle for "cgroup.procs" */
+ 	struct cgroup_file events_file;	/* handle for "cgroup.events" */
+@@ -427,7 +464,7 @@ struct cgroup {
+ 	u16 old_subtree_ss_mask;
+ 
+ 	/* Private pointers for each registered subsystem */
+-	struct cgroup_subsys_state __rcu *subsys[CGROUP_SUBSYS_COUNT];
++	struct cgroup_subsys_state __rcu *subsys[CGROUP_SUBSYS_MAIN_COUNT];
+ 
+ 	struct cgroup_root *root;
+ 
+@@ -444,7 +481,7 @@ struct cgroup {
+ 	 * following lists all css_sets which point to this cgroup's css
+ 	 * for the given subsystem.
+ 	 */
+-	struct list_head e_csets[CGROUP_SUBSYS_COUNT];
++	struct list_head e_csets[CGROUP_SUBSYS_MAIN_COUNT];
+ 
+ 	/*
+ 	 * If !threaded, self.  If threaded, it points to the nearest
+@@ -490,10 +527,115 @@ struct cgroup {
+ 	/* Used to store internal freezer state */
+ 	struct cgroup_freezer_state freezer;
+ 
++#ifndef __GENKSYMS__
++	/* high 32 bits of the extension slots pointer (ABI-neutral padding) */
++	u32 ext_hi;
++#endif
++
+ 	/* ids of the ancestors at each level including self */
+ 	u64 ancestor_ids[];
+ };
+ 
++/*
++ * Extension storage for cgroup subsystems beyond the original KMI.  Kept
++ * out of struct cgroup so its layout (and the module CRCs) stay identical
++ * to the GKI reference.
++ */
++struct cgroup_ext {
++	struct cgroup_subsys_state __rcu *subsys[CGROUP_SUBSYS_EXT_SLOTS];
++	struct list_head e_csets[CGROUP_SUBSYS_EXT_SLOTS];
++};
++
++#ifndef __GENKSYMS__
++static inline bool cgroup_ssid_is_ext(int ssid)
++{
++	return ssid >= CGROUP_SUBSYS_MAIN_COUNT;
++}
++
++static inline int cgroup_ext_index(int ssid)
++{
++	return ssid - CGROUP_SUBSYS_MAIN_COUNT;
++}
++
++static inline struct ext_css_set *css_set_to_ext(struct css_set *cset)
++{
++	/* struct css_set is the first member of struct ext_css_set */
++	return (struct ext_css_set *)cset;
++}
++
++static inline struct cgroup_subsys_state *
++css_set_get_subsys(struct css_set *cset, int ssid)
++{
++	if (cgroup_ssid_is_ext(ssid))
++		return css_set_to_ext(cset)->ext_subsys[cgroup_ext_index(ssid)];
++	return cset->subsys[ssid];
++}
++
++static inline void css_set_set_subsys(struct css_set *cset, int ssid,
++				      struct cgroup_subsys_state *css)
++{
++	if (cgroup_ssid_is_ext(ssid))
++		css_set_to_ext(cset)->ext_subsys[cgroup_ext_index(ssid)] = css;
++	else
++		cset->subsys[ssid] = css;
++}
++
++static inline struct list_head *css_set_e_cset_node(struct css_set *cset, int ssid)
++{
++	if (cgroup_ssid_is_ext(ssid))
++		return &css_set_to_ext(cset)->ext_e_cset_node[cgroup_ext_index(ssid)];
++	return &cset->e_cset_node[ssid];
++}
++
++static inline struct css_set *css_set_from_e_cset_node(struct list_head *node, int ssid)
++{
++	if (cgroup_ssid_is_ext(ssid))
++		return (struct css_set *)((char *)node -
++			offsetof(struct ext_css_set, ext_e_cset_node) -
++			cgroup_ext_index(ssid) * sizeof(struct list_head));
++	return (struct css_set *)((char *)node -
++		offsetof(struct css_set, e_cset_node) -
++		ssid * sizeof(struct list_head));
++}
++
++static inline struct cgroup_ext *cgroup_to_ext(struct cgroup *cgrp)
++{
++	u64 p = ((u64)cgrp->ext_hi << 32) | cgrp->ext_lo;
++
++	return (struct cgroup_ext *)(unsigned long)p;
++}
++
++static inline void cgroup_set_ext(struct cgroup *cgrp, struct cgroup_ext *ext)
++{
++	u64 p = (unsigned long)ext;
++
++	cgrp->ext_lo = (u32)p;
++	cgrp->ext_hi = (u32)(p >> 32);
++}
++
++static inline struct cgroup_subsys_state __rcu **
++cgroup_subsys_ptr(struct cgroup *cgrp, int ssid)
++{
++	if (cgroup_ssid_is_ext(ssid))
++		return &cgroup_to_ext(cgrp)->subsys[cgroup_ext_index(ssid)];
++	return &cgrp->subsys[ssid];
++}
++
++static inline struct list_head *cgroup_e_csets_ptr(struct cgroup *cgrp, int ssid)
++{
++	if (cgroup_ssid_is_ext(ssid))
++		return &cgroup_to_ext(cgrp)->e_csets[cgroup_ext_index(ssid)];
++	return &cgrp->e_csets[ssid];
++}
++#else
++#define css_set_get_subsys(cset, ssid)		(NULL)
++#define css_set_set_subsys(cset, ssid, css)	do { } while (0)
++#define css_set_e_cset_node(cset, ssid)		(NULL)
++#define css_set_from_e_cset_node(node, ssid)	(NULL)
++#define cgroup_subsys_ptr(cgrp, ssid)		(NULL)
++#define cgroup_e_csets_ptr(cgrp, ssid)		(NULL)
++#endif /* __GENKSYMS__ */
++
+ /*
+  * A cgroup_root represents the root of a cgroup hierarchy, and may be
+  * associated with a kernfs_root to form an active hierarchy.  This is
+diff --git a/include/linux/cgroup.h b/include/linux/cgroup.h
+index 3c0b5b31a..f681238cc 100644
+--- a/include/linux/cgroup.h
++++ b/include/linux/cgroup.h
+@@ -474,7 +474,7 @@ extern spinlock_t css_set_lock;
+  * synchronization rules are the same as task_css_set_check().
+  */
+ #define task_css_check(task, subsys_id, __c)				\
+-	task_css_set_check((task), (__c))->subsys[(subsys_id)]
++	css_set_get_subsys(task_css_set_check((task), (__c)), (subsys_id))
+ 
+ /**
+  * task_css_set - obtain a task's css_set
+@@ -542,7 +542,7 @@ task_get_css(struct task_struct *task, int subsys_id)
+ static inline bool task_css_is_root(struct task_struct *task, int subsys_id)
+ {
+ 	return task_css_check(task, subsys_id, true) ==
+-		init_css_set.subsys[subsys_id];
++		css_set_get_subsys(&init_css_set, subsys_id);
+ }
+ 
+ static inline struct cgroup *task_cgroup(struct task_struct *task,
+diff --git a/include/linux/cgroup_subsys.h b/include/linux/cgroup_subsys.h
+index acb77dcff..21fd4efed 100644
+--- a/include/linux/cgroup_subsys.h
++++ b/include/linux/cgroup_subsys.h
+@@ -29,22 +29,10 @@ SUBSYS(io)
+ SUBSYS(memory)
+ #endif
+ 
+-#if IS_ENABLED(CONFIG_CGROUP_DEVICE)
+-SUBSYS(devices)
+-#endif
+-
+ #if IS_ENABLED(CONFIG_CGROUP_FREEZER)
+ SUBSYS(freezer)
+ #endif
+ 
+-#if IS_ENABLED(CONFIG_CGROUP_NET_CLASSID)
+-SUBSYS(net_cls)
+-#endif
+-
+-#if IS_ENABLED(CONFIG_CGROUP_PERF)
+-SUBSYS(perf_event)
+-#endif
+-
+ #if IS_ENABLED(CONFIG_CGROUP_NET_PRIO)
+ SUBSYS(net_prio)
+ #endif
+@@ -53,10 +41,6 @@ SUBSYS(net_prio)
+ SUBSYS(hugetlb)
+ #endif
+ 
+-#if IS_ENABLED(CONFIG_CGROUP_PIDS)
+-SUBSYS(pids)
+-#endif
+-
+ #if IS_ENABLED(CONFIG_CGROUP_RDMA)
+ SUBSYS(rdma)
+ #endif
+@@ -68,6 +52,37 @@ SUBSYS(rdma)
+ SUBSYS(debug)
+ #endif
+ 
++/*
++ * Controllers added after the 5.10 KMI are kept at the end so that their
++ * subsystem ids are >= CGROUP_SUBSYS_MAIN_COUNT; their state lives in the
++ * ext structures instead of struct css_set / struct cgroup.
++ * CONFIG_CGROUP_DEBUG must stay disabled: it would shift this boundary.
++ *
++ * genksyms must not see these entries: they would change the
++ * enum cgroup_subsys_id members and CGROUP_SUBSYS_COUNT, which genksyms
++ * folds into the CRCs of symbols touching struct css_set / struct cgroup.
++ */
++#if IS_ENABLED(CONFIG_CGROUP_DEVICE) && !defined(__GENKSYMS__)
++SUBSYS(devices)
++#endif
++
++#if IS_ENABLED(CONFIG_CGROUP_PIDS) && !defined(__GENKSYMS__)
++SUBSYS(pids)
++#endif
++
++/*
++ * perf_event stays disabled: CONFIG_CGROUP_PERF adds fields to struct
++ * perf_event (reachable from task_struct) and changes ~1000 KMI CRCs.
++ * If it is ever enabled, CGROUP_SUBSYS_EXT_SLOTS must be bumped too.
++ */
++#if IS_ENABLED(CONFIG_CGROUP_PERF) && !defined(__GENKSYMS__)
++SUBSYS(perf_event)
++#endif
++
++#if IS_ENABLED(CONFIG_CGROUP_NET_CLASSID) && !defined(__GENKSYMS__)
++SUBSYS(net_cls)
++#endif
++
+ /*
+  * DO NOT ADD ANY SUBSYSTEM WITHOUT EXPLICIT ACKS FROM CGROUP MAINTAINERS.
+  */
+diff --git a/kernel/cgroup/cgroup-v1.c b/kernel/cgroup/cgroup-v1.c
+index 3a5941c28..e4e3a4c82 100644
+--- a/kernel/cgroup/cgroup-v1.c
++++ b/kernel/cgroup/cgroup-v1.c
+@@ -1218,6 +1218,16 @@ static int cgroup1_root_to_use(struct fs_context *fc)
+ 	if (!root)
+ 		return -ENOMEM;
+ 
++	{
++		struct cgroup_ext *ext = kzalloc(sizeof(*ext), GFP_KERNEL);
++
++		if (!ext) {
++			kfree(root);
++			return -ENOMEM;
++		}
++		cgroup_set_ext(&root->cgrp, ext);
++	}
++
+ 	ctx->root = root;
+ 	init_cgroup_root(ctx);
+ 
+diff --git a/kernel/cgroup/cgroup.c b/kernel/cgroup/cgroup.c
+index b0566af16..02d3c5869 100644
+--- a/kernel/cgroup/cgroup.c
++++ b/kernel/cgroup/cgroup.c
+@@ -503,7 +503,7 @@ static struct cgroup_subsys_state *cgroup_css(struct cgroup *cgrp,
+ 					      struct cgroup_subsys *ss)
+ {
+ 	if (ss)
+-		return rcu_dereference_check(cgrp->subsys[ss->id],
++		return rcu_dereference_check(*cgroup_subsys_ptr(cgrp, ss->id),
+ 					lockdep_is_held(&cgroup_mutex));
+ 	else
+ 		return &cgrp->self;
+@@ -588,7 +588,7 @@ struct cgroup_subsys_state *cgroup_e_css(struct cgroup *cgrp,
+ 		cgrp = cgroup_parent(cgrp);
+ 	} while (cgrp);
+ 
+-	return init_css_set.subsys[ss->id];
++	return css_set_get_subsys(&init_css_set, ss->id);
+ }
+ 
+ /**
+@@ -617,7 +617,7 @@ struct cgroup_subsys_state *cgroup_get_e_css(struct cgroup *cgrp,
+ 		cgrp = cgroup_parent(cgrp);
+ 	} while (cgrp);
+ 
+-	css = init_css_set.subsys[ss->id];
++	css = css_set_get_subsys(&init_css_set, ss->id);
+ 	css_get(css);
+ out_unlock:
+ 	rcu_read_unlock();
+@@ -677,7 +677,7 @@ struct cgroup_subsys_state *of_css(struct kernfs_open_file *of)
+ 	 * be and stay valid until the enclosing operation is complete.
+ 	 */
+ 	if (cft->ss)
+-		return rcu_dereference_raw(cgrp->subsys[cft->ss->id]);
++		return rcu_dereference_raw(*cgroup_subsys_ptr(cgrp, cft->ss->id));
+ 	else
+ 		return &cgrp->self;
+ }
+@@ -694,7 +694,7 @@ EXPORT_SYMBOL_GPL(of_css);
+ #define for_each_css(css, ssid, cgrp)					\
+ 	for ((ssid) = 0; (ssid) < CGROUP_SUBSYS_COUNT; (ssid)++)	\
+ 		if (!((css) = rcu_dereference_check(			\
+-				(cgrp)->subsys[(ssid)],			\
++				*cgroup_subsys_ptr((cgrp), (ssid)),	\
+ 				lockdep_is_held(&cgroup_mutex)))) { }	\
+ 		else
+ 
+@@ -969,6 +969,20 @@ static unsigned long css_set_hash(struct cgroup_subsys_state *css[])
+ 	return key;
+ }
+ 
++/* Same hash as css_set_hash(), but reads through the ext accessors. */
++static unsigned long css_set_hash_cset(struct css_set *cset)
++{
++	unsigned long key = 0UL;
++	struct cgroup_subsys *ss;
++	int i;
++
++	for_each_subsys(ss, i)
++		key += (unsigned long)css_set_get_subsys(cset, i);
++	key = (key >> 16) ^ key;
++
++	return key;
++}
++
+ void put_css_set_locked(struct css_set *cset)
+ {
+ 	struct cgrp_cset_link *link, *tmp_link;
+@@ -984,8 +998,8 @@ void put_css_set_locked(struct css_set *cset)
+ 
+ 	/* This css_set is dead. unlink it and release cgroup and css refs */
+ 	for_each_subsys(ss, ssid) {
+-		list_del(&cset->e_cset_node[ssid]);
+-		css_put(cset->subsys[ssid]);
++		list_del(css_set_e_cset_node(cset, ssid));
++		css_put(css_set_get_subsys(cset, ssid));
+ 	}
+ 	hash_del(&cset->hlist);
+ 	css_set_count--;
+@@ -1023,14 +1037,16 @@ static bool compare_css_sets(struct css_set *cset,
+ {
+ 	struct cgroup *new_dfl_cgrp;
+ 	struct list_head *l1, *l2;
++	int i;
+ 
+ 	/*
+ 	 * On the default hierarchy, there can be csets which are
+ 	 * associated with the same set of cgroups but different csses.
+ 	 * Let's first ensure that csses match.
+ 	 */
+-	if (memcmp(template, cset->subsys, sizeof(cset->subsys)))
+-		return false;
++	for (i = 0; i < CGROUP_SUBSYS_COUNT; i++)
++		if (css_set_get_subsys(cset, i) != template[i])
++			return false;
+ 
+ 
+ 	/* @cset's domain should match the default cgroup's */
+@@ -1122,7 +1138,7 @@ static struct css_set *find_existing_css_set(struct css_set *old_cset,
+ 			 * @ss is not in this hierarchy, so we don't want
+ 			 * to change the css.
+ 			 */
+-			template[i] = old_cset->subsys[i];
++			template[i] = css_set_get_subsys(old_cset, i);
+ 		}
+ 	}
+ 
+@@ -1264,9 +1280,14 @@ static struct css_set *find_css_set(struct css_set *old_cset,
+ 	INIT_LIST_HEAD(&ext_cset->mg_dst_preload_node);
+ 	INIT_LIST_HEAD(&cset->mg_node);
+ 
++	/* initialize the extension slot lists */
++	for (ssid = CGROUP_SUBSYS_MAIN_COUNT; ssid < CGROUP_SUBSYS_COUNT; ssid++)
++		INIT_LIST_HEAD(css_set_e_cset_node(cset, ssid));
++
+ 	/* Copy the set of subsystem state objects generated in
+ 	 * find_existing_css_set() */
+-	memcpy(cset->subsys, template, sizeof(cset->subsys));
++	for (ssid = 0; ssid < CGROUP_SUBSYS_COUNT; ssid++)
++		css_set_set_subsys(cset, ssid, template[ssid]);
+ 
+ 	spin_lock_irq(&css_set_lock);
+ 	/* Add reference counts and links from the new css_set. */
+@@ -1283,14 +1304,14 @@ static struct css_set *find_css_set(struct css_set *old_cset,
+ 	css_set_count++;
+ 
+ 	/* Add @cset to the hash table */
+-	key = css_set_hash(cset->subsys);
++	key = css_set_hash_cset(cset);
+ 	hash_add(css_set_table, &cset->hlist, key);
+ 
+ 	for_each_subsys(ss, ssid) {
+-		struct cgroup_subsys_state *css = cset->subsys[ssid];
++		struct cgroup_subsys_state *css = css_set_get_subsys(cset, ssid);
+ 
+-		list_add_tail(&cset->e_cset_node[ssid],
+-			      &css->cgroup->e_csets[ssid]);
++		list_add_tail(css_set_e_cset_node(cset, ssid),
++			      cgroup_e_csets_ptr(css->cgroup, ssid));
+ 		css_get(css);
+ 	}
+ 
+@@ -1351,6 +1372,8 @@ static void cgroup_exit_root_id(struct cgroup_root *root)
+ 
+ void cgroup_free_root(struct cgroup_root *root)
+ {
++	if (root != &cgrp_dfl_root)
++		kfree(cgroup_to_ext(&root->cgrp));
+ 	kfree(root);
+ }
+ 
+@@ -1804,7 +1827,6 @@ int rebind_subsystems(struct cgroup_root *dst_root, u16 ss_mask)
+ 		struct cgroup_root *src_root = ss->root;
+ 		struct cgroup *scgrp = &src_root->cgrp;
+ 		struct cgroup_subsys_state *css = cgroup_css(scgrp, ss);
+-		struct css_set *cset, *cset_pos;
+ 		struct css_task_iter *it;
+ 
+ 		WARN_ON(!css || cgroup_css(dcgrp, ss));
+@@ -1817,27 +1839,36 @@ int rebind_subsystems(struct cgroup_root *dst_root, u16 ss_mask)
+ 		}
+ 
+ 		/* rebind */
+-		RCU_INIT_POINTER(scgrp->subsys[ssid], NULL);
+-		rcu_assign_pointer(dcgrp->subsys[ssid], css);
++		RCU_INIT_POINTER(*cgroup_subsys_ptr(scgrp, ssid), NULL);
++		rcu_assign_pointer(*cgroup_subsys_ptr(dcgrp, ssid), css);
+ 		ss->root = dst_root;
+ 
+ 		spin_lock_irq(&css_set_lock);
+ 		css->cgroup = dcgrp;
+-		WARN_ON(!list_empty(&dcgrp->e_csets[ss->id]));
+-		list_for_each_entry_safe(cset, cset_pos, &scgrp->e_csets[ss->id],
+-					 e_cset_node[ss->id]) {
+-			list_move_tail(&cset->e_cset_node[ss->id],
+-				       &dcgrp->e_csets[ss->id]);
+-			/*
+-			 * all css_sets of scgrp together in same order to dcgrp,
+-			 * patch in-flight iterators to preserve correct iteration.
+-			 * since the iterator is always advanced right away and
+-			 * finished when it->cset_pos meets it->cset_head, so only
+-			 * update it->cset_head is enough here.
+-			 */
+-			list_for_each_entry(it, &cset->task_iters, iters_node)
+-				if (it->cset_head == &scgrp->e_csets[ss->id])
+-					it->cset_head = &dcgrp->e_csets[ss->id];
++		{
++			struct list_head *sc_head = cgroup_e_csets_ptr(scgrp, ssid);
++			struct list_head *dc_head = cgroup_e_csets_ptr(dcgrp, ssid);
++			struct list_head *pos, *n;
++
++			WARN_ON(!list_empty(dc_head));
++			list_for_each_safe(pos, n, sc_head) {
++				struct css_set *cset =
++					css_set_from_e_cset_node(pos, ssid);
++
++				list_move_tail(pos, dc_head);
++				/*
++				 * all css_sets of scgrp together in same order to
++				 * dcgrp, patch in-flight iterators to preserve
++				 * correct iteration.  since the iterator is always
++				 * advanced right away and finished when
++				 * it->cset_pos meets it->cset_head, so only update
++				 * it->cset_head is enough here.
++				 */
++				list_for_each_entry(it, &cset->task_iters,
++						    iters_node)
++					if (it->cset_head == sc_head)
++						it->cset_head = dc_head;
++			}
+ 		}
+ 		spin_unlock_irq(&css_set_lock);
+ 
+@@ -1986,7 +2017,7 @@ static void init_cgroup_housekeeping(struct cgroup *cgrp)
+ 	prev_cputime_init(&cgrp->prev_cputime);
+ 
+ 	for_each_subsys(ss, ssid)
+-		INIT_LIST_HEAD(&cgrp->e_csets[ssid]);
++		INIT_LIST_HEAD(cgroup_e_csets_ptr(cgrp, ssid));
+ 
+ 	init_waitqueue_head(&cgrp->offline_waitq);
+ 	INIT_WORK(&cgrp->release_agent_work, cgroup1_release_agent);
+@@ -2525,9 +2556,10 @@ struct task_struct *cgroup_taskset_next(struct cgroup_taskset *tset,
+ 			 * has its ->mg_dst_cset set.
+ 			 */
+ 			if (cset->mg_dst_cset)
+-				*dst_cssp = cset->mg_dst_cset->subsys[tset->ssid];
++				*dst_cssp = css_set_get_subsys(cset->mg_dst_cset,
++							       tset->ssid);
+ 			else
+-				*dst_cssp = cset->subsys[tset->ssid];
++				*dst_cssp = css_set_get_subsys(cset, tset->ssid);
+ 
+ 			return task;
+ 		}
+@@ -2831,7 +2863,8 @@ int cgroup_migrate_prepare_dst(struct cgroup_mgctx *mgctx)
+ 			put_css_set(dst_cset);
+ 
+ 		for_each_subsys(ss, ssid)
+-			if (src_cset->subsys[ssid] != dst_cset->subsys[ssid])
++			if (css_set_get_subsys(src_cset, ssid) !=
++			    css_set_get_subsys(dst_cset, ssid))
+ 				mgctx->ss_mask |= 1 << ssid;
+ 	}
+ 
+@@ -4592,7 +4625,7 @@ static struct css_set *css_task_iter_next_css_set(struct css_task_iter *it)
+ 	}
+ 
+ 	if (it->ss) {
+-		cset = container_of(l, struct css_set, e_cset_node[it->ss->id]);
++		cset = css_set_from_e_cset_node(l, it->ss->id);
+ 	} else {
+ 		link = list_entry(l, struct cgrp_cset_link, cset_link);
+ 		cset = link->cset;
+@@ -4755,7 +4788,7 @@ void css_task_iter_start(struct cgroup_subsys_state *css, unsigned int flags,
+ 	it->flags = flags;
+ 
+ 	if (it->ss)
+-		it->cset_pos = &css->cgroup->e_csets[css->ss->id];
++		it->cset_pos = cgroup_e_csets_ptr(css->cgroup, css->ss->id);
+ 	else
+ 		it->cset_pos = &css->cgroup->cset_links;
+ 
+@@ -5217,6 +5250,7 @@ static void css_free_rwork_fn(struct work_struct *work)
+ 			psi_cgroup_free(cgrp);
+ 			if (cgroup_on_dfl(cgrp))
+ 				cgroup_rstat_exit(cgrp);
++			kfree(cgroup_to_ext(cgrp));
+ 			kfree(cgrp);
+ 		} else {
+ 			/*
+@@ -5333,7 +5367,7 @@ static int online_css(struct cgroup_subsys_state *css)
+ 		ret = ss->css_online(css);
+ 	if (!ret) {
+ 		css->flags |= CSS_ONLINE;
+-		rcu_assign_pointer(css->cgroup->subsys[ss->id], css);
++		rcu_assign_pointer(*cgroup_subsys_ptr(css->cgroup, ss->id), css);
+ 
+ 		atomic_inc(&css->online_cnt);
+ 		if (css->parent)
+@@ -5356,7 +5390,7 @@ static void offline_css(struct cgroup_subsys_state *css)
+ 		ss->css_offline(css);
+ 
+ 	css->flags &= ~CSS_ONLINE;
+-	RCU_INIT_POINTER(css->cgroup->subsys[ss->id], NULL);
++	RCU_INIT_POINTER(*cgroup_subsys_ptr(css->cgroup, ss->id), NULL);
+ 
+ 	wake_up_all(&css->cgroup->offline_waitq);
+ }
+@@ -5445,6 +5479,16 @@ static struct cgroup *cgroup_create(struct cgroup *parent, const char *name,
+ 	if (!cgrp)
+ 		return ERR_PTR(-ENOMEM);
+ 
++	{
++		struct cgroup_ext *ext = kzalloc(sizeof(*ext), GFP_KERNEL);
++
++		if (!ext) {
++			kfree(cgrp);
++			return ERR_PTR(-ENOMEM);
++		}
++		cgroup_set_ext(cgrp, ext);
++	}
++
+ 	ret = percpu_ref_init(&cgrp->self.refcnt, css_release, 0, GFP_KERNEL);
+ 	if (ret)
+ 		goto out_free_cgrp;
+@@ -5547,6 +5591,7 @@ static struct cgroup *cgroup_create(struct cgroup *parent, const char *name,
+ out_cancel_ref:
+ 	percpu_ref_exit(&cgrp->self.refcnt);
+ out_free_cgrp:
++	kfree(cgroup_to_ext(cgrp));
+ 	kfree(cgrp);
+ 	return ERR_PTR(ret);
+ }
+@@ -5865,7 +5910,7 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
+ 	 * pointer to this state - since the subsystem is
+ 	 * newly registered, all tasks and hence the
+ 	 * init_css_set is in the subsystem's root cgroup. */
+-	init_css_set.subsys[ss->id] = css;
++	css_set_set_subsys(&init_css_set, ss->id, css);
+ 
+ 	have_fork_callback |= (bool)ss->fork << ss->id;
+ 	have_exit_callback |= (bool)ss->exit << ss->id;
+@@ -5888,12 +5933,24 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
+  * Initialize cgroups at system boot, and initialize any
+  * subsystems that request early init.
+  */
++static struct cgroup_ext cgrp_dfl_root_ext;
++
+ int __init cgroup_init_early(void)
+ {
+ 	static struct cgroup_fs_context __initdata ctx;
+ 	struct cgroup_subsys *ss;
+ 	int i;
+ 
++	/*
++	 * The hidden ext pointer must live in existing struct padding so the
++	 * layout seen by vendor modules is unchanged.  If these fire, the
++	 * controller set or the config changed the stock layout.
++	 */
++	BUILD_BUG_ON(CGROUP_SUBSYS_MAIN_COUNT != 7);
++	BUILD_BUG_ON(offsetof(struct cgroup, ext_lo) != 276);
++	BUILD_BUG_ON(offsetof(struct cgroup, ext_hi) != 2748);
++
++	cgroup_set_ext(&cgrp_dfl_root.cgrp, &cgrp_dfl_root_ext);
+ 	ctx.root = &cgrp_dfl_root;
+ 	init_cgroup_root(&ctx);
+ 	cgrp_dfl_root.cgrp.self.flags |= CSS_NO_REF;
+@@ -5951,7 +6008,7 @@ int __init cgroup_init(void)
+ 	 * it during init.
+ 	 */
+ 	hash_add(css_set_table, &init_css_set.hlist,
+-		 css_set_hash(init_css_set.subsys));
++		 css_set_hash_cset(&init_css_set));
+ 
+ 	BUG_ON(cgroup_setup_root(&cgrp_dfl_root, 0));
+ 
+@@ -5960,7 +6017,7 @@ int __init cgroup_init(void)
+ 	for_each_subsys(ss, ssid) {
+ 		if (ss->early_init) {
+ 			struct cgroup_subsys_state *css =
+-				init_css_set.subsys[ss->id];
++				css_set_get_subsys(&init_css_set, ss->id);
+ 
+ 			css->id = cgroup_idr_alloc(&ss->css_idr, css, 1, 2,
+ 						   GFP_KERNEL);
+@@ -5969,8 +6026,8 @@ int __init cgroup_init(void)
+ 			cgroup_init_subsys(ss, false);
+ 		}
+ 
+-		list_add_tail(&init_css_set.e_cset_node[ssid],
+-			      &cgrp_dfl_root.cgrp.e_csets[ssid]);
++		list_add_tail(css_set_e_cset_node(&init_css_set, ssid),
++			      cgroup_e_csets_ptr(&cgrp_dfl_root.cgrp, ssid));
+ 
+ 		/*
+ 		 * Setting dfl_root subsys_mask needs to consider the
+@@ -6005,17 +6062,17 @@ int __init cgroup_init(void)
+ 		}
+ 
+ 		if (ss->bind)
+-			ss->bind(init_css_set.subsys[ssid]);
++			ss->bind(css_set_get_subsys(&init_css_set, ssid));
+ 
+ 		mutex_lock(&cgroup_mutex);
+-		css_populate_dir(init_css_set.subsys[ssid]);
++		css_populate_dir(css_set_get_subsys(&init_css_set, ssid));
+ 		mutex_unlock(&cgroup_mutex);
+ 	}
+ 
+ 	/* init_css_set.subsys[] has been updated, re-hash */
+ 	hash_del(&init_css_set.hlist);
+ 	hash_add(css_set_table, &init_css_set.hlist,
+-		 css_set_hash(init_css_set.subsys));
++		 css_set_hash_cset(&init_css_set));
+ 
+ 	WARN_ON(sysfs_create_mount_point(fs_kobj, "cgroup"));
+ 	WARN_ON(register_filesystem(&cgroup_fs_type));
+diff --git a/kernel/cgroup/debug.c b/kernel/cgroup/debug.c
+index 80aa3f027..a86d07500 100644
+--- a/kernel/cgroup/debug.c
++++ b/kernel/cgroup/debug.c
+@@ -61,7 +61,7 @@ static int current_css_set_read(struct seq_file *seq, void *v)
+ 	 * Print the css'es stored in the current css_set.
+ 	 */
+ 	for_each_subsys(ss, i) {
+-		css = cset->subsys[ss->id];
++		css = css_set_get_subsys(cset, ss->id);
+ 		if (!css)
+ 			continue;
+ 		seq_printf(seq, "%2d: %-4s\t- %p[%d]\n", ss->id, ss->name,
+@@ -214,7 +214,7 @@ static int cgroup_subsys_states_read(struct seq_file *seq, void *v)
+ 		return -ENODEV;
+ 
+ 	for_each_subsys(ss, i) {
+-		css = rcu_dereference_check(cgrp->subsys[ss->id], true);
++		css = rcu_dereference_check(*cgroup_subsys_ptr(cgrp, ss->id), true);
+ 		if (!css)
+ 			continue;
+ 
+diff --git a/kernel/cgroup/pids.c b/kernel/cgroup/pids.c
+index 511af87f6..feaf1b05e 100644
+--- a/kernel/cgroup/pids.c
++++ b/kernel/cgroup/pids.c
+@@ -222,7 +222,7 @@ static int pids_can_fork(struct task_struct *task, struct css_set *cset)
+ 	int err;
+ 
+ 	if (cset)
+-		css = cset->subsys[pids_cgrp_id];
++		css = css_set_get_subsys(cset, pids_cgrp_id);
+ 	else
+ 		css = task_css_check(current, pids_cgrp_id, true);
+ 	pids = css_pids(css);
+@@ -245,7 +245,7 @@ static void pids_cancel_fork(struct task_struct *task, struct css_set *cset)
+ 	struct pids_cgroup *pids;
+ 
+ 	if (cset)
+-		css = cset->subsys[pids_cgrp_id];
++		css = css_set_get_subsys(cset, pids_cgrp_id);
+ 	else
+ 		css = task_css_check(current, pids_cgrp_id, true);
+ 	pids = css_pids(css);

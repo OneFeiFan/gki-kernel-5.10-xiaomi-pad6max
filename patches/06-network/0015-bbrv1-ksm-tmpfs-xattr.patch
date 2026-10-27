@@ -1,0 +1,32 @@
+From eb4f940a086236f7304e75a17c77c8bbee7ff65f Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Mon, 26 Oct 2026 19:22:05 +0800
+Subject: [PATCH] phase10.5: enable BBRv1, KSM and tmpfs xattrs
+
+Enable BBR (default cubic), KSM (run=0), and TMPFS_XATTR/POSIX_ACL. Disable BIC/WESTWOOD/HTCP modules to keep the GKI module list unchanged. Gates: 7298 baseline symbols unchanged, 355 vendor modules 0 failures, boot; bbr in tcp_available_congestion_control, ksm present, zram still [lz4kd].
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ arch/arm64/configs/gki_defconfig | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 76a8233ab..759dcf828 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -876,3 +876,15 @@ CONFIG_CRYPTO_LZ4K=y
+ CONFIG_CRYPTO_LZ4KD=y
+ CONFIG_CRYPTO_842=y
+ CONFIG_CRYPTO_LZ4K_OPLUS=y
++
++# Phase 10.5: BBRv1, KSM, tmpfs xattrs.
++CONFIG_TCP_CONG_ADVANCED=y
++CONFIG_TCP_CONG_BBR=y
++CONFIG_KSM=y
++CONFIG_TMPFS_XATTR=y
++CONFIG_TMPFS_POSIX_ACL=y
++
++# Keep only cubic and BBR when TCP_CONG_ADVANCED is on.
++# CONFIG_TCP_CONG_BIC is not set
++# CONFIG_TCP_CONG_WESTWOOD is not set
++# CONFIG_TCP_CONG_HTCP is not set

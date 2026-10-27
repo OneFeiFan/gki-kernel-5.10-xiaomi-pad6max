@@ -1,0 +1,118 @@
+From 71369082acc6e3ba9254347cabac7fc785161f1c Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Wed, 28 Oct 2026 00:49:33 +0800
+Subject: [PATCH] gki_defconfig: restore stock runtime defaults, tune via
+ modules
+
+Keep every added feature available but stop forcing it as a boot default,
+so the kernel is generic and the KernelSU module owns runtime policy:
+
+- drop CONFIG_DEFAULT_BBR3 / the DEFAULT_CUBIC override: cubic stays the
+  default, bbr3 remains selectable.
+- drop MQ_ADIOS_DEFAULT and the elevator_init_mq() special case: vendor
+  cpq/bfq selection is back, adios remains available.
+- set ZRAM_DEF_COMP back to lz4 and remove the comp_algorithm_store()
+  lz4->lz4kd rewrite; lz4kd stays in the algorithm list.
+- leave the le9uo patch's own default (workingset_protection=1) alone.
+
+Verified on yudi: cubic, [lz4], sda [cpq], sdb-sdf [bfq], le9uo 1.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ arch/arm64/configs/gki_defconfig | 12 +++---------
+ block/Kconfig.iosched            |  7 -------
+ block/elevator.c                 |  9 ++-------
+ drivers/block/zram/zram_drv.c    |  9 ---------
+ 4 files changed, 5 insertions(+), 32 deletions(-)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index f7c56caab..db710316b 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -870,7 +870,7 @@ CONFIG_ZSMALLOC=y
+ CONFIG_ZRAM=y
+ CONFIG_MODULE_SIG=n
+ CONFIG_CRYPTO_LZO=y
+-CONFIG_ZRAM_DEF_COMP_LZ4KD=y
++CONFIG_ZRAM_DEF_COMP_LZ4=y
+ CONFIG_CRYPTO_LZ4HC=y
+ CONFIG_CRYPTO_LZ4K=y
+ CONFIG_CRYPTO_LZ4KD=y
+@@ -892,12 +892,6 @@ CONFIG_TMPFS_POSIX_ACL=y
+ # Phase 10.6: BBRv3.
+ CONFIG_TCP_CONG_BBR3=y
+ 
+-# Phase 10.7: make BBRv3 the default congestion control.
+-CONFIG_DEFAULT_BBR3=y
+-# CONFIG_DEFAULT_CUBIC is not set
+-
+-# Phase 10.8a: ADIOS available but not the default.
++# BBRv3 is available, but the kernel keeps the stock default (cubic).
++# The runtime module selects bbr3 when requested.
+ CONFIG_MQ_IOSCHED_ADIOS=y
+-
+-# Phase 10.10: make ADIOS the default (blk-mq hctx ordering fixed in 10.9).
+-CONFIG_MQ_ADIOS_DEFAULT=y
+diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
+index 8d02eeeee..886743bbb 100644
+--- a/block/Kconfig.iosched
++++ b/block/Kconfig.iosched
+@@ -31,13 +31,6 @@ config MQ_IOSCHED_ADIOS
+ 	  The Adaptive Deadline I/O Scheduler (ADIOS) is a multi-queue I/O
+ 	  scheduler with learning-based adaptive latency control.
+ 
+-config MQ_ADIOS_DEFAULT
+-	bool "ADIOS default I/O scheduler"
+-	depends on MQ_IOSCHED_ADIOS
+-	default y
+-	help
+-	  Use the Adaptive Deadline I/O Scheduler by default.
+-
+ config IOSCHED_BFQ
+ 	tristate "BFQ I/O scheduler"
+ 	help
+diff --git a/block/elevator.c b/block/elevator.c
+index dfff365c9..a0a4a0319 100644
+--- a/block/elevator.c
++++ b/block/elevator.c
+@@ -675,15 +675,10 @@ void elevator_init_mq(struct request_queue *q)
+ 	if (unlikely(q->elevator))
+ 		return;
+ 
+-	if (IS_ENABLED(CONFIG_MQ_ADIOS_DEFAULT)) {
+-		e = elevator_get(q, "adios", false);
+-		if (!e && !q->required_elevator_features)
+-			e = elevator_get_default(q);
+-	} else if (!q->required_elevator_features) {
++	if (!q->required_elevator_features)
+ 		e = elevator_get_default(q);
+-	} else {
++	else
+ 		e = elevator_get_by_features(q);
+-	}
+ 	if (!e)
+ 		return;
+ 
+diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
+index fbdebaed7..488e4b4cc 100644
+--- a/drivers/block/zram/zram_drv.c
++++ b/drivers/block/zram/zram_drv.c
+@@ -1024,15 +1024,6 @@ static ssize_t comp_algorithm_store(struct device *dev,
+ 	if (sz > 0 && compressor[sz - 1] == '\n')
+ 		compressor[sz - 1] = 0x00;
+ 
+-#ifdef CONFIG_ZRAM_DEF_COMP_LZ4KD
+-	/*
+-	 * The vendor init scripts hard-code "lz4"; map it to lz4kd so the
+-	 * Huawei backend selected at build time is actually used.
+-	 */
+-	if (!strcmp(compressor, "lz4"))
+-		strlcpy(compressor, "lz4kd", sizeof(compressor));
+-#endif
+-
+ 	if (!zcomp_available_algorithm(compressor))
+ 		return -EINVAL;
+ 
+-- 
+2.34.1
+

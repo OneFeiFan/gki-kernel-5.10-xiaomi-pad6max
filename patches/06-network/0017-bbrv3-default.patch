@@ -1,0 +1,24 @@
+From 62cec6795b862ac46d6f7898a4f5e7f8b5a39d9a Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Mon, 26 Oct 2026 19:49:09 +0800
+Subject: [PATCH] phase10.7: make BBRv3 the default congestion control
+
+Set DEFAULT_BBR3=y so the kernel boots with bbr3 by default. cubic and bbr remain available. Gates: 7298 baseline symbols unchanged, 355 vendor modules 0 failures, boot; tcp_congestion_control is bbr3 without any runtime sysctl.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ arch/arm64/configs/gki_defconfig | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 134fac1be..0a49ec59b 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -891,3 +891,7 @@ CONFIG_TMPFS_POSIX_ACL=y
+ 
+ # Phase 10.6: BBRv3.
+ CONFIG_TCP_CONG_BBR3=y
++
++# Phase 10.7: make BBRv3 the default congestion control.
++CONFIG_DEFAULT_BBR3=y
++# CONFIG_DEFAULT_CUBIC is not set

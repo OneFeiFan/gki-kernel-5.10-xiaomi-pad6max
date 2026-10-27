@@ -1,0 +1,32 @@
+From dbdc674aeb977493682d8ce175af5e7c23024914 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Mon, 26 Oct 2026 07:49:02 +0800
+Subject: [PATCH] phase10.4a: map vendor lz4 writes to lz4kd
+
+Android vendor post_boot scripts hard-code lz4 before zram is initialized. Map lz4 to lz4kd in comp_algorithm_store so the selected Huawei backend is actually active. Kernel-only; 7298 baseline symbols unchanged, 355 vendor modules 0 failures, boot, zram0 16GB with [lz4kd].
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ drivers/block/zram/zram_drv.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
+index 488e4b4cc..fbdebaed7 100644
+--- a/drivers/block/zram/zram_drv.c
++++ b/drivers/block/zram/zram_drv.c
+@@ -1024,6 +1024,15 @@ static ssize_t comp_algorithm_store(struct device *dev,
+ 	if (sz > 0 && compressor[sz - 1] == '\n')
+ 		compressor[sz - 1] = 0x00;
+ 
++#ifdef CONFIG_ZRAM_DEF_COMP_LZ4KD
++	/*
++	 * The vendor init scripts hard-code "lz4"; map it to lz4kd so the
++	 * Huawei backend selected at build time is actually used.
++	 */
++	if (!strcmp(compressor, "lz4"))
++		strlcpy(compressor, "lz4kd", sizeof(compressor));
++#endif
++
+ 	if (!zcomp_available_algorithm(compressor))
+ 		return -EINVAL;
+ 
