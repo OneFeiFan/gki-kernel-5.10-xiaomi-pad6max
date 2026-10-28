@@ -7,7 +7,7 @@
 - AOSP `android12-5.10-lts`，5.10.272 合并提交：`a1eed2e9c`
   （`Merge 5.10.272 into android12-5.10-lts`）
 - 应用本目录的 `series` 后，应得到当前仓库的内核源码树；
-  实测 tree 哈希为 `41e3c675a3e2fa1cf9f88f642dbe14981cf8ac55`
+  实测 tree 哈希为 `a4d99381e70ff4723600c26db421080f22d29e47`
   （不含 `patches/` 目录本身）。
 
 ## 应用方法
@@ -99,12 +99,14 @@ while read p; do git apply "$PATCHES/$p"; done < "$PATCHES/series"
 | `06-network/0047-tcp_bbr3-tolerate-a-missing-private-state-in-cwnd_ev.patch` | `92f390aef` | tcp_bbr3: tolerate a missing private state in cwnd_event |
 | `02-wine/0048-futex-destroy-the-waitv-timer-when-kcalloc-fails.patch` | `8590ea2ff` | futex: destroy the waitv timer when kcalloc() fails |
 | `09-docs/0049-docs-p1p3-and-container-notes.patch` | `9b90ab18754ed4f22166bd846870538149514165` | docs: record p1p3, the stock cfs_rq layout and container notes |
+| `00-platform/0050-gki-defconfig-criu-fhandle.patch` | `24c415a31` | gki_defconfig: enable the CRIU diag families and FHANDLE |
+| `09-docs/0051-docs-p1p4-criu-fhandle.patch` | `4af581cbebe5a659141b1d198d9a717307718470` | docs: record p1p4 and the CRIU/FHANDLE result |
 
 ## 验证
 
 - 每个补丁保留原提交的作者和提交信息，`git am` 会重建对应提交。
-- 应用完 `series` 后，内核源码树（不含 `patches/` 目录）应与提交 `9b90ab18754ed4f22166bd846870538149514165`
-  的 tree 一致：`41e3c675a3e2fa1cf9f88f642dbe14981cf8ac55`
-  （实测在 `a1eed2e9c` 上按 `series` 顺序 `git am` 49 个补丁，得到同一 tree；
+- 应用完 `series` 后，内核源码树（不含 `patches/` 目录）应与提交 `4af581cbebe5a659141b1d198d9a717307718470`
+  的 tree 一致：`a4d99381e70ff4723600c26db421080f22d29e47`
+  （实测在 `a1eed2e9c` 上按 `series` 顺序 `git am` 51 个补丁，得到同一 tree；
   `09-docs` 只改 README；`patches/` 目录本身不在补丁里）。
 - 本项目的硬门禁：7298 个基线导出符号 CRC 差异为 0；355 个 vendor_boot 和 315 个 vendor_dlkm 模块 0 失败。详见 `README.gki-docker.md`。

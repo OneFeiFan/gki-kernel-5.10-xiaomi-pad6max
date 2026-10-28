@@ -1,0 +1,121 @@
+From 4af581cbebe5a659141b1d198d9a717307718470 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Thu, 29 Oct 2026 01:13:41 +0800
+Subject: [PATCH] docs: record p1p4 and the CRIU/FHANDLE result
+
+Update the kernel and image lines for boot_272_p1p4.img, mark the CRIU
+diag families and FHANDLE as enabled, and record that the ntsync
+stress_wait failure comes from the selftest's non-atomic counter being
+hoisted out of the loop by the compiler, not from the kernel.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ README.gki-docker.md | 31 ++++++++++++++++++-------------
+ 1 file changed, 18 insertions(+), 13 deletions(-)
+
+diff --git a/README.gki-docker.md b/README.gki-docker.md
+index bcf1c5196..075c65a9b 100644
+--- a/README.gki-docker.md
++++ b/README.gki-docker.md
+@@ -3,9 +3,9 @@
+ 基于 AOSP `android12-5.10-lts` 的自编译内核，目标是在小米平板 6 Max 上直接运行 Docker/Droidspaces 容器和 Wine/Proton，同时不破坏原厂 `vendor_boot` 模块的 KMI。
+ 
+ - 设备：Xiaomi Pad 6 Max（yudi，SM8475）
+-- 内核：`5.10.272-android12-9-g8590ea2ff18c`（2026-10-29 构建，含 32 位 futex_waitv、CFS_BANDWIDTH、P0/P1/P2 与 0046-0048）
+-- 当前镜像：`boot_272_p1p3.img`（272 + KernelSU + CFS_BANDWIDTH + P0/P1/P2 + 0046-0048）
+-- 回退镜像：`boot_272_p1p2.img`、`boot_272_p0.img` 和 `boot_272_simple.img`；stock 备份为 `boot_backup_pre_simple.img`
++- 内核：`5.10.272-android12-9-gd78a2ae2a-dirty`（2026-10-29 构建，含 32 位 futex_waitv、CFS_BANDWIDTH、P0/P1/P2、0046-0048 与 CRIU DIAG/FHANDLE）
++- 当前镜像：`boot_272_p1p4.img`（272 + KernelSU + CFS_BANDWIDTH + P0/P1/P2 + 0046-0048 + CRIU/FHANDLE）
++- 回退镜像：`boot_272_p1p3.img`、`boot_272_p1p2.img`、`boot_272_p0.img` 和 `boot_272_simple.img`；stock 备份为 `boot_backup_pre_simple.img`
+ - GitHub：<https://github.com/OneFeiFan/gki-kernel-5.10-xiaomi-pad6max>（无历史快照分支 `pad6max`）
+ 
+ ## 状态
+@@ -23,6 +23,8 @@
+ | CPU 限制 | CFS_BANDWIDTH 已开启（kABI 拆分），Droidspaces `--cpus` 可用 |
+ | cfs_rq 布局 | vendor 数据数组保持 stock 344；带宽指针在尾部填充 472（static_assert 344/472/512） |
+ | BBRv3 / futex_waitv | `cwnd_event` 空指针保护；`kcalloc` 失败时也销毁 waitv 定时器 |
++| CRIU / FHANDLE | `UNIX_DIAG`/`PACKET_DIAG`/`NETLINK_DIAG` + `FHANDLE` 已开启 |
++| ntsync stress | `stress_wait` 10/11 的失败来自测试程序：非 atomic 的 `stress_counter` 被编译器提出循环；内核 mutex 交接正常 |
+ | 模块 CRC 校验 | 恢复 5.10 的拒绝逻辑；CRC 不匹配的模块不会静默加载 |
+ | IPC / netns 布局 | `next_id` 移到 side table；`key_ht`=104、`tcp_death_row`=640 已 static_assert |
+ | NTSync | time namespace 转换 + `owner != 0` 校验；设备节点按 sysfs minor 创建 |
+@@ -31,7 +33,7 @@
+ 
+ | 方向 | 内容 |
+ | --- | --- |
+-| 容器 | cgroup devices/pids/perf/net_cls、nftables、bridge netfilter、IPv6 NAT、IPVS、SCTP、VXLAN、VLAN、IPVLAN、MACVLAN、L2TP、FOU、GRE、tc、BLK_DEV_THROTTLING、Btrfs、checkpoint/restore |
++| 容器 | cgroup devices/pids/perf/net_cls、nftables、bridge netfilter、IPv6 NAT、IPVS、SCTP、VXLAN、VLAN、IPVLAN、MACVLAN、L2TP、FOU、GRE、tc、BLK_DEV_THROTTLING、Btrfs、checkpoint/restore、CRIU DIAG（UNIX/PACKET/NETLINK）、FHANDLE |
+ | Wine/Proton | NTSync（`/dev/ntsync`，按 misc minor 动态创建；time namespace/owner 校验）、`futex_waitv`（syscall 449，64/32 位）、`epoll_pwait2`（syscall 441） |
+ | 内存 | le9uo 工作集保护（补丁默认开启）；KSM 可用但默认不运行 |
+ | 存储 | zram/zsmalloc 内建，LZ4K/LZ4KD + ARM64 NEON，默认 `lz4` |
+@@ -50,6 +52,7 @@
+ - 恢复 5.10 的模块 CRC 拒绝路径；保留项目自己的 zram 符号黑名单。
+ - ntsync 的 monotonic 超时经 `timens_ktime_to_host()` 转换，`owner == 0` 返回 `-EINVAL`；模块脚本从 `/sys/class/misc/ntsync/dev` 读主次设备号。
+ - BBRv3 的 `cwnd_event` 在私有状态 NULL/未初始化时提前返回；`futex_waitv` 在 `kcalloc` 失败路径也销毁 on-stack hrtimer（对齐上游 94cd8fa09f5f）。
++- CRIU 依赖（`UNIX_DIAG`/`PACKET_DIAG`/`NETLINK_DIAG`）和 `FHANDLE` 已开启；`FHANDLE` 不要给容器 `CAP_DAC_READ_SEARCH`。
+ - ADIOS 的 `limit_depth()` 依赖 `data->hctx`；5.10 的顺序修复保留，ADIOS 仍是可选项。
+ - 内核不再改写 zram 算法：默认 `lz4`，需要 `lz4kd` 时由 `yudi-tweaks` 模块在开机后 swapoff/reset 切换。
+ - 内核只保证能力和 stock 默认；BBRv3、ADIOS、zram、KSM、DAMON 等运行时开关交给模块。le9uo 是例外：补丁自身默认开启（`mm/vmscan.c` 默认值 1），模块可以关。
+@@ -101,11 +104,10 @@ adb shell su -c 'sh /data/local/tmp/verify_yudi_kernel.sh --quick'
+ /data/local/tmp/vt_tests/epoll_wakeup_test
+ ```
+ 
+-2026-10-29 实测：verify PASS 41 / FAIL 3（3 个 FAIL 都是脚本/工具误报：
++2026-10-29 实测（p1p4）：verify PASS 41 / FAIL 3（3 个 FAIL 都是脚本/工具误报：
+ `/proc/config.gz` 是旧的内嵌配置，实际 `.config` 和运行时 CFS 都正常；`ip` 的 ipvlan
+ netlink 被 SELinux 拒绝；旧 `ss` 不显示 bbr3 诊断）。zram 10 种算法 32MB 往返全部
+-一致；ntsync 10/11（`stress_wait` 失败，其余 10 项通过）、owner 2/2、futex_waitv 7/7、
+-epoll 63/63。
++一致；ntsync 10/11（`stress_wait` 见已知限制）、owner 2/2、futex_waitv 7/7、epoll 63/63。
+ 
+ 需要看布局时用 `pahole` 核对 `struct net`、`struct net_device`、`struct request_queue` 等关键结构。
+ 
+@@ -113,15 +115,15 @@ epoll 63/63。
+ 
+ ```sh
+ adb reboot bootloader
+-fastboot flash boot_a boot_272_p1p3.img
++fastboot flash boot_a boot_272_p1p4.img
+ fastboot reboot
+ ```
+ 
+-刷前确认 `boot_272_p1p2.img`（上一版已验证）、`boot_272_p0.img`、`boot_272_simple.img`（272 + KernelSU）和 `boot_backup_pre_simple.img`（stock）存在。回退：
++刷前确认 `boot_272_p1p3.img`（上一版已验证）、`boot_272_p1p2.img`、`boot_272_p0.img`、`boot_272_simple.img`（272 + KernelSU）和 `boot_backup_pre_simple.img`（stock）存在。回退：
+ 
+ ```sh
++fastboot flash boot_a boot_272_p1p3.img
+ fastboot flash boot_a boot_272_p1p2.img
+-# 或者更早的 P0 / 272 + KernelSU：
+ fastboot flash boot_a boot_272_p0.img
+ fastboot flash boot_a boot_272_simple.img
+ # 或者彻底回到 stock：
+@@ -137,7 +139,7 @@ fastboot flash boot_a boot_backup_pre_simple.img
+ | 模块 | 作用 |
+ | --- | --- |
+ | `ntsync` | 开机按 `/sys/class/misc/ntsync/dev` 创建 `/dev/ntsync`（v1.1） |
+-| `yudi-tweaks` | WebUI 配置内核运行时开关，并显示 CPU 限制和 ntsync 状态；默认只开安全项（sysctl、BBRv3、le9uo、zram）（v1.3） |
++| `yudi-tweaks` | WebUI 配置内核运行时开关，并显示 CPU 限制和 ntsync 状态；默认只开安全项（sysctl、BBRv3、le9uo、zram）（v1.4） |
+ 
+ `yudi-tweaks` 默认设置的值：
+ 
+@@ -156,6 +158,8 @@ cat /proc/sys/fs/inotify/max_user_instances
+ grep ntsync /proc/misc
+ cat /sys/class/misc/ntsync/dev   # 需要 root
+ cat /proc/sys/kernel/sem_next_id
++zcat /proc/config.gz | grep -E 'FHANDLE|UNIX_DIAG|PACKET_DIAG|NETLINK_DIAG'
++/data/local/tmp/vt_tests/ntsync_test   # 10/11（stress_wait 为测试程序问题）
+ grep __arm64_sys_futex_waitv /proc/kallsyms
+ grep __arm64_compat_sys_futex_waitv /proc/kallsyms
+ grep __arm64_sys_epoll_pwait2 /proc/kallsyms
+@@ -195,8 +199,9 @@ while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series"
+ - **KSM 默认关闭**：`/sys/kernel/mm/ksm/run=0`；按进程 KSM 尚未实现。
+ - **`tcp_plb_enabled=0` 保持**：PLB 是数据中心 IPv6 多路径优化，手机网络没有收益；模块不改这个 sysctl。
+ - **net_cls 已启用但未配置**：`CONFIG_NET_CLS_CGROUP`/`CGROUP_NET_CLASSID` 可用，但没有默认 classid；Docker 默认不用，需要按容器分流时再配 tc/nft。
+-- **CRIU / docker checkpoint 依赖未开**：`UNIX_DIAG`、`PACKET_DIAG`、`NETLINK_DIAG` 未启用；不做容器快照/迁移不用。
+-- **FHANDLE 未启用**：纯配置，只多两个 syscall；容器里用 systemd 当 init 时建议开；开启后不要给容器 `CAP_DAC_READ_SEARCH`。
++- **CRIU / docker checkpoint**：`UNIX_DIAG`、`PACKET_DIAG`、`NETLINK_DIAG` 已启用，可配合 CRIU 做容器快照/迁移。
++- **FHANDLE 已启用**：容器里用 systemd 当 init 时可用；注意不要给容器 `CAP_DAC_READ_SEARCH`。
++- **`ntsync` `stress_wait` 10/11**：v6.18 自测里的 `stress_counter` 不是 atomic/volatile，编译后加载被提到循环外（反汇编可见），四个线程各写自己的 base+10000，最后由最后写入者决定结果；内核的 mutex 交接和其它 10 项自测正常。要拿到 11/11，需要把测试里的计数器改成 atomic/volatile 后重编。
+ - **`CONFIG_MODULE_SIG` 未开启**：GKI 基线默认就没有开启，本仓库不再显式写 `=n`（写不写结果一样）。
+ - **zram 切换有前提**：模块会先 swapoff + reset；已用 swap 超过阈值时跳过，等下次重启再切。
+ - **未全局开启 overlayfs metacopy/index**：这两个开关会改默认行为，metacopy 还会连带 redirect_dir。

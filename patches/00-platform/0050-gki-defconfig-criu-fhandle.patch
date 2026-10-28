@@ -1,0 +1,33 @@
+From 24c415a311d184a89c588b633e7cc533a8968d39 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Thu, 29 Oct 2026 01:13:41 +0800
+Subject: [PATCH] gki_defconfig: enable the CRIU diag families and FHANDLE
+
+Enable UNIX_DIAG, PACKET_DIAG and NETLINK_DIAG so CRIU/docker
+checkpoint can collect socket state, and FHANDLE so systemd can be used
+as a container init.
+
+FHANDLE selects EXPORTFS. Do not give containers CAP_DAC_READ_SEARCH:
+file handles are only meaningful inside the container's own mount
+namespace.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ arch/arm64/configs/gki_defconfig | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index d7a15d148..81fd17f00 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -860,6 +860,10 @@ CONFIG_CFS_BANDWIDTH=y
+ CONFIG_BLK_DEV_THROTTLING=y
+ CONFIG_NET_CLS_CGROUP=y
+ CONFIG_CHECKPOINT_RESTORE=y
++CONFIG_UNIX_DIAG=y
++CONFIG_PACKET_DIAG=y
++CONFIG_NETLINK_DIAG=y
++CONFIG_FHANDLE=y
+ CONFIG_BTRFS_FS=y
+ CONFIG_BTRFS_FS_POSIX_ACL=y
+ 

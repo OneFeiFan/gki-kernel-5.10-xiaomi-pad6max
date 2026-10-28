@@ -47,3 +47,5 @@
 06-network/0047-tcp_bbr3-tolerate-a-missing-private-state-in-cwnd_ev.patch
 02-wine/0048-futex-destroy-the-waitv-timer-when-kcalloc-fails.patch
 09-docs/0049-docs-p1p3-and-container-notes.patch
+00-platform/0050-gki-defconfig-criu-fhandle.patch
+09-docs/0051-docs-p1p4-criu-fhandle.patch
