@@ -50,7 +50,7 @@ bash build/build.sh -j12
 | P0/P1/P2 修复 | 模块 CRC 拒绝恢复；`next_id` side table；`netns_ipv4` pin；ntsync timens/owner |
 | 0046-0048 | cfs_rq 指针在尾部填充 472（vendor 数据 344）；bbr3 `cwnd_event` 空指针保护；futex_waitv 定时器 |
 | CRIU / FHANDLE | `UNIX_DIAG`/`PACKET_DIAG`/`NETLINK_DIAG` 和 `FHANDLE` 已开启；容器不要给 `CAP_DAC_READ_SEARCH` |
-| 行为测试 | verify --quick 30 PASS / 3 FAIL（脚本误报：`/proc/config.gz` 内嵌旧配置、ipvlan SELinux、旧 `ss`）；ntsync 10/11（`stress_wait` 为测试程序问题）、owner 2/2、futex 7/7、epoll 63/63 |
+| 行为测试 | verify 41 PASS / 3 FAIL（脚本误报：`/proc/config.gz` 内嵌旧配置、ipvlan SELinux、旧 `ss`）；ntsync 10/11（`stress_wait` 为测试程序问题）、owner 2/2、futex 7/7、epoll 63/63 |
 | 32 位 futex_waitv | 已接线（syscall 449） |
 | 内核默认值 | 保持 stock：cubic、vendor 调度器、zram `lz4` |
 | 运行时开关 | 由 `yudi-tweaks` 模块开启（BBRv3、le9uo、zram `lz4kd`、KSM、ADIOS、DAMON） |
