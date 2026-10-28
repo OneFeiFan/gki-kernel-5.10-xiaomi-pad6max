@@ -1,57 +1,32 @@
-From 42ebf3a81b9eb1279abbfa98504f623e64853de1 Mon Sep 17 00:00:00 2001
+From f648923bed2381cc032b0ec0863f881326906282 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
-Date: Mon, 26 Oct 2026 19:39:50 +0800
-Subject: [PATCH] phase10.6: backport BBRv3 and TCP PLB
+Date: Thu, 29 Oct 2026 01:52:56 +0800
+Subject: [PATCH] tcp: backport BBRv3 and TCP PLB
 
-Backport the WildKernels android12-5.10 BBRv3 and TCP PLB patch. The tcp_sock bitfields reuse the existing unused bits under __GENKSYMS__ and the BBR state is private. Adapt 5.10.272 manually: insert the rejected PLB sysctl netns block and pass the rate sample to tcp_process_tlp_ack(). Gates: 7298 baseline symbols unchanged, 355 vendor modules 0 failures, boot; tcp_available_congestion_control contains bbr3 and switching works; tcp_plb sysctls present.
+Backport BBRv3 and the TCP PLB control, including the cwnd_event guard for a missing private state (bbr3_init() allocates with GFP_ATOMIC).
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 ---
- arch/arm64/configs/gki_defconfig |    3 +
- include/linux/netdevice.h        |    1 +
- include/linux/tcp.h              |    6 +
- include/net/tcp.h                |  220 ++-
- include/uapi/linux/inet_diag.h   |   25 +
- include/uapi/linux/rtnetlink.h   |    4 +-
- net/ipv4/Kconfig                 |   22 +
- net/ipv4/Makefile                |    3 +-
- net/ipv4/sysctl_net_ipv4.c       |  125 ++
- net/ipv4/tcp.c                   |    1 +
- net/ipv4/tcp_bbr3.c              | 2364 ++++++++++++++++++++++++++++++
- net/ipv4/tcp_cong.c              |    1 +
- net/ipv4/tcp_input.c             |   44 +-
- net/ipv4/tcp_ipv4.c              |   13 +
- net/ipv4/tcp_minisocks.c         |    2 +
- net/ipv4/tcp_output.c            |   36 +-
- net/ipv4/tcp_plb.c               |  122 ++
- net/ipv4/tcp_rate.c              |   39 +-
- 18 files changed, 3015 insertions(+), 16 deletions(-)
+ include/linux/tcp.h            |    6 +
+ include/net/tcp.h              |  220 ++-
+ include/uapi/linux/inet_diag.h |   25 +
+ include/uapi/linux/rtnetlink.h |    4 +-
+ net/ipv4/Kconfig               |   22 +
+ net/ipv4/Makefile              |    3 +-
+ net/ipv4/sysctl_net_ipv4.c     |  125 ++
+ net/ipv4/tcp.c                 |    1 +
+ net/ipv4/tcp_bbr3.c            | 2368 ++++++++++++++++++++++++++++++++
+ net/ipv4/tcp_cong.c            |    1 +
+ net/ipv4/tcp_input.c           |   44 +-
+ net/ipv4/tcp_ipv4.c            |   13 +
+ net/ipv4/tcp_minisocks.c       |    2 +
+ net/ipv4/tcp_output.c          |   36 +-
+ net/ipv4/tcp_plb.c             |  122 ++
+ net/ipv4/tcp_rate.c            |   39 +-
+ 16 files changed, 3015 insertions(+), 16 deletions(-)
  create mode 100644 net/ipv4/tcp_bbr3.c
  create mode 100644 net/ipv4/tcp_plb.c
 
-diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index 759dcf828..134fac1be 100644
---- a/arch/arm64/configs/gki_defconfig
-+++ b/arch/arm64/configs/gki_defconfig
-@@ -888,3 +888,6 @@ CONFIG_TMPFS_POSIX_ACL=y
- # CONFIG_TCP_CONG_BIC is not set
- # CONFIG_TCP_CONG_WESTWOOD is not set
- # CONFIG_TCP_CONG_HTCP is not set
-+
-+# Phase 10.6: BBRv3.
-+CONFIG_TCP_CONG_BBR3=y
-diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
-index c1f54996a..721dd79b8 100644
---- a/include/linux/netdevice.h
-+++ b/include/linux/netdevice.h
-@@ -2182,6 +2182,7 @@ struct net_device {
- 
- 	/* for setting kernel sock attribute on TCP connection setup */
- #define GSO_MAX_SIZE		65536
-+#define GSO_LEGACY_MAX_SIZE	65536u
- 	unsigned int		gso_max_size;
- #define GSO_MAX_SEGS		65535
- 	u16			gso_max_segs;
 diff --git a/include/linux/tcp.h b/include/linux/tcp.h
 index 6d00e1b29..0c7ca7899 100644
 --- a/include/linux/tcp.h
@@ -672,10 +647,10 @@ index deee564a8..3947a9af9 100644
  	/* Clean up fastopen related fields */
 diff --git a/net/ipv4/tcp_bbr3.c b/net/ipv4/tcp_bbr3.c
 new file mode 100644
-index 000000000..b3868c541
+index 000000000..828039719
 --- /dev/null
 +++ b/net/ipv4/tcp_bbr3.c
-@@ -0,0 +1,2364 @@
+@@ -0,0 +1,2368 @@
 +/* BBR (Bottleneck Bandwidth and RTT) congestion control
 + *
 + * BBR is a model-based congestion control algorithm that aims for low queues,
@@ -1148,6 +1123,10 @@ index 000000000..b3868c541
 +{
 +	struct tcp_sock *tp = tcp_sk(sk);
 +	struct bbr3 *bbr = bbr3_get_priv(sk);
++
++	/* bbr3_init() allocates with GFP_ATOMIC and may fail. */
++	if (!bbr || !bbr->initialized)
++		return;
 +
 +	if (event == CA_EVENT_TX_START) {
 +		if (!tp->app_limited)

@@ -1,13 +1,12 @@
-From 8f015b6cacdf8495b273d10d925703a6181d68cc Mon Sep 17 00:00:00 2001
+From ee930c7b6b028d78450de3b84bf531944e4e29db Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
-Date: Mon, 26 Oct 2026 07:37:58 +0800
-Subject: [PATCH] phase10.4: build zram in with LZ4K/LZ4KD and ARM64 NEON
+Date: Thu, 29 Oct 2026 01:52:56 +0800
+Subject: [PATCH] zram: build in LZ4K/LZ4KD with ARM64 NEON
 
-Replace lib/lz4 with the upstream implementation plus lz4armv8 NEON, add the SukiSU lz4k/lz4kd crypto backends and zram backend patches, and build zram/zsmalloc into the kernel with lz4kd as the default. Module signing is disabled as in the local zram recipe. Gates: 7298 baseline symbols unchanged, 355 vendor modules 0 failures, boot, zram0 16GB with lz4hc/lz4k/lz4k_oplus/lz4kd in comp_algorithm. Android vendor init still writes lz4 to zram0, so the active algorithm remains lz4 until that init is changed.
+Add the LZ4K, LZ4K-oplus and LZ4KD codecs with the ARM64 NEON accelerator, wire them into zram and the crypto API, and keep the runtime algorithm selection for the KernelSU module.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 ---
- arch/arm64/configs/gki_defconfig |   12 +
  crypto/Kconfig                   |   18 +
  crypto/Makefile                  |    2 +
  crypto/lz4.c                     |    8 +-
@@ -22,7 +21,6 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
  include/linux/lz4.h              |  655 +-----
  include/linux/lz4k.h             |  383 ++++
  include/linux/lz4kd.h            |  326 +++
- kernel/module.c                  |   28 +-
  lib/Kconfig                      |   13 +
  lib/Makefile                     |    5 +
  lib/lz4/Makefile                 |   10 +-
@@ -55,7 +53,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
  lib/lz4kd/lz4kd_encode_delta.c   |  259 +++
  lib/lz4kd/lz4kd_encode_private.h |  135 ++
  lib/lz4kd/lz4kd_private.h        |  304 +++
- 48 files changed, 12931 insertions(+), 3332 deletions(-)
+ 46 files changed, 12896 insertions(+), 3327 deletions(-)
  create mode 100644 crypto/lz4k.c
  create mode 100644 crypto/lz4kd.c
  create mode 100644 include/linux/lz4k.h
@@ -90,26 +88,6 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
  create mode 100644 lib/lz4kd/lz4kd_encode_private.h
  create mode 100644 lib/lz4kd/lz4kd_private.h
 
-diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index d87cdb682..76a8233ab 100644
---- a/arch/arm64/configs/gki_defconfig
-+++ b/arch/arm64/configs/gki_defconfig
-@@ -864,3 +864,15 @@ CONFIG_BTRFS_FS_POSIX_ACL=y
- 
- # Phase 10.1: NTSync for Wine/Proton.
- CONFIG_NTSYNC=y
-+
-+# Phase 10.4: ZRAM LZ4K/LZ4KD with ARM64 NEON.
-+CONFIG_ZSMALLOC=y
-+CONFIG_ZRAM=y
-+CONFIG_MODULE_SIG=n
-+CONFIG_CRYPTO_LZO=y
-+CONFIG_ZRAM_DEF_COMP_LZ4KD=y
-+CONFIG_CRYPTO_LZ4HC=y
-+CONFIG_CRYPTO_LZ4K=y
-+CONFIG_CRYPTO_LZ4KD=y
-+CONFIG_CRYPTO_842=y
-+CONFIG_CRYPTO_LZ4K_OPLUS=y
 diff --git a/crypto/Kconfig b/crypto/Kconfig
 index a7b2aa661..fe4826115 100644
 --- a/crypto/Kconfig
@@ -1982,72 +1960,6 @@ index 000000000..cef922d1e
 +
 +
 +#endif /* _LZ4KD_H */
-diff --git a/kernel/module.c b/kernel/module.c
-index 0750270d1..87d119278 100644
---- a/kernel/module.c
-+++ b/kernel/module.c
-@@ -1346,9 +1346,8 @@ static int check_version(const struct load_info *info,
- 	return 1;
- 
- bad_version:
--	pr_warn("%s: disagrees about version of symbol %s\n",
--	       info->name, symname);
--	return 0;
-+
-+	return 1;
- }
- 
- static inline int check_modstruct_version(const struct load_info *info,
-@@ -3559,13 +3558,26 @@ int __weak module_frob_arch_sections(Elf_Ehdr *hdr,
- 
- /* module_blacklist is a comma-separated list of module names */
- static char *module_blacklist;
-+static char *custom_module_blacklist[] = {
-+#if IS_BUILTIN(CONFIG_CRYPTO_LZO)
-+    "lzo", "lzo_rle",
-+#endif
-+#if IS_BUILTIN(CONFIG_ZRAM)
-+    "zram", "oplus_bsp_hybridswap_zram",
-+#endif
-+#if IS_BUILTIN(CONFIG_ZSMALLOC)
-+    "zsmalloc", "oplus_bsp_zsmalloc",
-+#endif
-+};
-+
- static bool blacklisted(const char *module_name)
- {
- 	const char *p;
- 	size_t len;
-+	int i;
- 
- 	if (!module_blacklist)
--		return false;
-+		goto custom_blacklist;
- 
- 	for (p = module_blacklist; *p; p += len) {
- 		len = strcspn(p, ",");
-@@ -3574,6 +3586,12 @@ static bool blacklisted(const char *module_name)
- 		if (p[len] == ',')
- 			len++;
- 	}
-+	
-+custom_blacklist:
-+	for (i = 0; i < ARRAY_SIZE(custom_module_blacklist); i++)
-+		if (!strcmp(module_name, custom_module_blacklist[i]))
-+			return true;
-+
- 	return false;
- }
- core_param(module_blacklist, module_blacklist, charp, 0400);
-@@ -4022,7 +4040,7 @@ static int load_module(struct load_info *info, const char __user *uargs,
- 	 * if it's blacklisted.
- 	 */
- 	if (blacklisted(info->name)) {
--		err = -EPERM;
-+		// err = -EPERM;
- 		pr_err("Module %s is blacklisted\n", info->name);
- 		goto free_copy;
- 	}
 diff --git a/lib/Kconfig b/lib/Kconfig
 index 1d41a35ce..04e6a7c43 100644
 --- a/lib/Kconfig

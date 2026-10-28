@@ -1,46 +1,19 @@
-From 100e06d77cabb0c0f7cf7774668d9c856a469ff4 Mon Sep 17 00:00:00 2001
+From ce585b6bca0180f9c300ceb1023c1756f101da43 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
-Date: Wed, 28 Oct 2026 22:41:27 +0800
+Date: Thu, 29 Oct 2026 01:52:57 +0800
 Subject: [PATCH] sched: add kABI-safe CFS bandwidth support
 
-Split the per-cfs_rq bandwidth state into a separately allocated
-cfs_rq_bandwidth object and the per-task_group state into
-cfs_bandwidth_state, with the task_group pointer in
-ANDROID_KABI_RESERVE(2). The cfs_rq pointer is hidden from genksyms;
-enable CONFIG_CFS_BANDWIDTH so Droidspaces can use --cpus.
-
-The cfs_rq vendor data array moves from offset 344 to 352 and is pinned
-with static_asserts. All 7298 exported symbol CRCs stay identical, and
-the 355 vendor_boot plus 315 vendor_dlkm modules load.
-
-Ported from Goldzxcbug's 5.15 cgroup_limits patch.
+Keep the bandwidth state in separately allocated objects and hide the cfs_rq pointer from genksyms. The pointer sits in the cfs_rq tail padding at 472, android_vendor_data1 stays at 344 and the struct size stays 512; static asserts pin all three.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 ---
- arch/arm64/configs/gki_defconfig |   5 +-
- kernel/sched/core.c              |  39 +++++---
- kernel/sched/debug.c             |   4 +-
- kernel/sched/fair.c              | 164 +++++++++++++++++--------------
- kernel/sched/pelt.h              |   9 +-
- kernel/sched/sched.h             |  69 ++++++++++---
- 6 files changed, 181 insertions(+), 109 deletions(-)
+ kernel/sched/core.c  |  39 ++++++----
+ kernel/sched/debug.c |   4 +-
+ kernel/sched/fair.c  | 164 ++++++++++++++++++++++++-------------------
+ kernel/sched/pelt.h  |   9 +--
+ kernel/sched/sched.h |  72 +++++++++++++++----
+ 5 files changed, 180 insertions(+), 108 deletions(-)
 
-diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index db710316b..ac8aefafa 100644
---- a/arch/arm64/configs/gki_defconfig
-+++ b/arch/arm64/configs/gki_defconfig
-@@ -854,8 +854,9 @@ CONFIG_NET_SCH_DEFAULT=y
- CONFIG_NET_SCH_FQ_PIE=y
- 
- # Phase 7: block throttle, net classifier, checkpoint, Btrfs.
--# CFS_BANDWIDTH is deferred: enabling it prevents this vendor kernel from
--# reaching adbd (boot bisect 2026-10-25: CFS+BLK fails, BLK alone boots).
-+# CFS_BANDWIDTH is enabled with the kABI-safe ext split (cfs_rq_bandwidth /
-+# cfs_bandwidth_state); see kernel/sched/sched.h.
-+CONFIG_CFS_BANDWIDTH=y
- CONFIG_BLK_DEV_THROTTLING=y
- CONFIG_NET_CLS_CGROUP=y
- CONFIG_CHECKPOINT_RESTORE=y
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
 index a2171c521..1a5465b51 100644
 --- a/kernel/sched/core.c
@@ -713,7 +686,7 @@ index 0245e3e21..469688dde 100644
  
 -
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index f292d8a39..8c7550885 100644
+index 88696e04a..5c53785f3 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
 @@ -3,6 +3,8 @@
@@ -729,10 +702,9 @@ index f292d8a39..8c7550885 100644
  extern struct list_head task_groups;
  
  struct cfs_bandwidth {
--#if defined(CONFIG_CFS_BANDWIDTH) && !defined(__GENKSYMS__)
 +};
 +
-+#ifdef CONFIG_CFS_BANDWIDTH
+ #ifdef CONFIG_CFS_BANDWIDTH
 +struct cfs_bandwidth_state {
  	raw_spinlock_t		lock;
  	ktime_t			period;
@@ -804,38 +776,42 @@ index f292d8a39..8c7550885 100644
  extern void unthrottle_cfs_rq(struct cfs_rq *cfs_rq);
  
  extern void free_rt_sched_group(struct task_group *tg);
-@@ -604,21 +639,27 @@ struct cfs_rq {
+@@ -603,22 +638,29 @@ struct cfs_rq {
+ 	struct list_head	leaf_cfs_rq_list;
  	struct task_group	*tg;	/* group that "owns" this runqueue */
  
- #if defined(CONFIG_CFS_BANDWIDTH) && !defined(__GENKSYMS__)
+-#ifdef CONFIG_CFS_BANDWIDTH
 -	int			runtime_enabled;
 -	s64			runtime_remaining;
--
++	ANDROID_VENDOR_DATA_ARRAY(1, 16);
+ 
 -	u64			throttled_clock;
 -	u64			throttled_clock_pelt;
 -	u64			throttled_clock_pelt_time;
 -	int			throttled;
 -	int			throttle_count;
 -	struct list_head	throttled_list;
++#if defined(CONFIG_CFS_BANDWIDTH) && !defined(__GENKSYMS__)
++	/*
++	 * Lives in the tail padding after the vendor array so that
++	 * android_vendor_data1 stays at its stock offset (344): vendor
++	 * modules address it with compiled-in offsets that genksyms
++	 * cannot see.
++	 */
 +	struct cfs_rq_bandwidth *cfs_bandwidth;
  #endif /* CONFIG_CFS_BANDWIDTH */
- 
- 	ANDROID_VENDOR_DATA_ARRAY(1, 16);
+-
+-	ANDROID_VENDOR_DATA_ARRAY(1, 16);
  #endif /* CONFIG_FAIR_GROUP_SCHED */
  };
  
-+#if defined(CONFIG_CFS_BANDWIDTH) && defined(CONFIG_FAIR_GROUP_SCHED) && \
-+	!defined(__GENKSYMS__)
-+/*
-+ * KMI note: the stock cfs_rq keeps ANDROID_VENDOR_DATA_ARRAY(1, 16) at
-+ * offset 344. The CFS bandwidth state pointer is deliberately placed
-+ * before it, shifting the vendor array to 352; the pointer itself is
-+ * hidden from genksyms. Pin the layout so future edits cannot move it
-+ * silently.
-+ */
-+static_assert(offsetof(struct cfs_rq, cfs_bandwidth) == 344);
-+static_assert(offsetof(struct cfs_rq, android_vendor_data1) == 352);
++#if defined(CONFIG_FAIR_GROUP_SCHED) && !defined(__GENKSYMS__)
++/* KMI: the stock cfs_rq layout seen by vendor modules must not move. */
++static_assert(offsetof(struct cfs_rq, android_vendor_data1) == 344);
 +static_assert(sizeof(struct cfs_rq) == 512);
++#ifdef CONFIG_CFS_BANDWIDTH
++static_assert(offsetof(struct cfs_rq, cfs_bandwidth) == 472);
++#endif
 +#endif
 +
  static inline int rt_bandwidth_enabled(void)

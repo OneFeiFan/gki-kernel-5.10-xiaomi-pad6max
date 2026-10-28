@@ -1,30 +1,19 @@
-From 8a84344a2558bc61a94ddacfe85e691655e2aacd Mon Sep 17 00:00:00 2001
+From 1ff10273ed5e88a039a5f100ec9e83e8b6e36598 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
-Date: Mon, 26 Oct 2026 20:34:59 +0800
-Subject: [PATCH] phase10.8: add ADIOS I/O scheduler as an available option
+Date: Thu, 29 Oct 2026 01:52:56 +0800
+Subject: [PATCH] block: add the ADIOS I/O scheduler
 
-Backport the ESK 5.10 block/adios.c and add MQ_IOSCHED_ADIOS. Do not select it by default: the boot-time default caused a first-screen reboot. Safe test: adios appears in the scheduler list; manual sda switch to [adios] works; 16MB dd at 2.2GB/s; the default remains cpq/bfq. Gates: 7298 baseline symbols unchanged, 355 vendor modules 0 failures.
+Add ADIOS as an available elevator and fix blk-mq to set hctx before elevator limit_depth(). The vendor init keeps BFQ/cpq as the default.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 ---
- arch/arm64/configs/gki_defconfig |    3 +
- block/Kconfig.iosched            |    7 +
- block/Makefile                   |    2 +
- block/adios.c                    | 2069 ++++++++++++++++++++++++++++++
- 4 files changed, 2081 insertions(+)
+ block/Kconfig.iosched |    7 +
+ block/Makefile        |    2 +
+ block/adios.c         | 2069 +++++++++++++++++++++++++++++++++++++++++
+ block/blk-mq.c        |   11 +-
+ 4 files changed, 2083 insertions(+), 6 deletions(-)
  create mode 100644 block/adios.c
 
-diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index 0a49ec59b..917bdeddf 100644
---- a/arch/arm64/configs/gki_defconfig
-+++ b/arch/arm64/configs/gki_defconfig
-@@ -895,3 +895,6 @@ CONFIG_TCP_CONG_BBR3=y
- # Phase 10.7: make BBRv3 the default congestion control.
- CONFIG_DEFAULT_BBR3=y
- # CONFIG_DEFAULT_CUBIC is not set
-+
-+# Phase 10.8a: ADIOS available but not the default.
-+CONFIG_MQ_IOSCHED_ADIOS=y
 diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
 index 64053d67a..886743bbb 100644
 --- a/block/Kconfig.iosched
@@ -2132,3 +2121,32 @@ index 000000000..ddd8fa926
 +MODULE_LICENSE("GPL");
 +MODULE_DESCRIPTION(ADIOS_PROGNAME);
 \ No newline at end of file
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index 96ede8fa0..75908b931 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -365,6 +365,10 @@ static struct request *__blk_mq_alloc_request(struct blk_mq_alloc_data *data)
+ 	if (data->cmd_flags & REQ_NOWAIT)
+ 		data->flags |= BLK_MQ_REQ_NOWAIT;
+ 
++retry:
++	data->ctx = blk_mq_get_ctx(q);
++	data->hctx = blk_mq_map_queue(q, data->cmd_flags, data->ctx);
++
+ 	if (e) {
+ 		/*
+ 		 * Flush requests are special and go directly to the
+@@ -375,12 +379,7 @@ static struct request *__blk_mq_alloc_request(struct blk_mq_alloc_data *data)
+ 		    e->type->ops.limit_depth &&
+ 		    !(data->flags & BLK_MQ_REQ_RESERVED))
+ 			e->type->ops.limit_depth(data->cmd_flags, data);
+-	}
+-
+-retry:
+-	data->ctx = blk_mq_get_ctx(q);
+-	data->hctx = blk_mq_map_queue(q, data->cmd_flags, data->ctx);
+-	if (!e)
++	} else
+ 		blk_mq_tag_busy(data->hctx);
+ 
+ 	/*

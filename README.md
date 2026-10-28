@@ -1,28 +1,34 @@
-# GKI 5.10.272 for Xiaomi Pad 6 Max (yudi)
+# GKI 5.10.272 for Xiaomi Pad 6 Max
 
-基于 AOSP `android12-5.10-lts`（5.10.272）的自编译内核，目标是在小米平板 6 Max 上运行 KernelSU、Docker/Droidspaces 容器和 Wine/Proton，同时保持原厂 `vendor_boot` 模块的 KMI。
+基于 AOSP `android12-5.10-lts`（5.10.272）的自编译内核，设备是小米平板 6 Max
+（yudi，SM8475）。目标是保持原厂 KMI 不变，同时能跑容器、Droidspaces 和
+Wine/Proton。
 
-- 设备：Xiaomi Pad 6 Max（yudi，SM8475）
-- 基线：`a1eed2e9c`（`Merge 5.10.272 into android12-5.10-lts`）
-- 当前镜像的内核：`5.10.272-android12-9-gd78a2ae2a9a5-dirty`
-- KernelSU 模块：<https://github.com/OneFeiFan/yudi-ksu-modules>
+导出符号布局保持 stock，`vendor_boot` 的 355 个模块和 `vendor_dlkm` 的 315 个
+`.ko` 直接加载。新增功能：
+
+- 容器：cgroup v1 的 devices/pids/perf/net_cls、nftables、bridge netfilter、
+  IPv6 NAT、IPVS、SCTP、VXLAN/VLAN/IPVLAN/MACVLAN、L2TP/FOU/GRE、tc、
+  blkio 限速、Btrfs、checkpoint/restore、CRIU diag、FHANDLE
+- Wine：NTSync、futex_waitv（64/32 位）、epoll_pwait2
+- 存储与调度：zram 的 LZ4K/LZ4KD、BBRv3、ADIOS、le9uo、CFS 带宽（kABI 拆分）
+
+内核只负责能力和 stock 默认值。BBRv3、zram 算法、KSM、ADIOS、DAMON 这些运行时
+开关由 KernelSU 模块负责。
 
 ## 仓库结构
 
 | 目录 | 内容 |
 | --- | --- |
-| `source/` | 完整内核源码树（即构建系统里的 `common/`），与刷机镜像同一代码状态 |
-| `patches/` | 相对 AOSP 5.10.272 的补丁系列（`series` 可在基线上重放） |
-| `docs/` | 系统状态交接、KernelSU 模块说明 |
-| `README.md` | 本文件 |
+| `source/` | 内核源码，构建环境里的 `common/` |
+| `patches/` | 相对 5.10.272 的 14 个功能补丁 |
+| `docs/` | 构建与验证、设备状态、模块说明 |
 
-`source/` 是应用完补丁的最终源码树，不是 AOSP 基线。要复现它：把 AOSP `common` 检出到 `a1eed2e9c`，再按 `patches/series` 应用补丁；`patches/README.md` 有完整命令和 tree 校验值。
-
-镜像的 `uname` 带 `-dirty`，因为构建时源码还没提交；之后的文档、补丁目录提交不改变内核二进制。从当前源码重新构建会得到新的 `g` 哈希，这是正常的。
+`source/` 是应用完补丁后的树，不是基线。复现方法见 `patches/README.md`。
 
 ## 构建
 
-`source/` 对应 Android 构建环境里的 `common/`；还需要 AOSP 的 `build/` 与 `prebuilts/`：
+`source/` 需要配 AOSP 的 `build/` 和 `prebuilts/`：
 
 ```sh
 git clone --branch pad6max https://github.com/OneFeiFan/gki-kernel-5.10-xiaomi-pad6max.git gki-yudi
@@ -32,42 +38,74 @@ cp -a gki-yudi/source ~/kernel-sources/vanilla-root/common
 cd ~/kernel-sources/vanilla-root
 SKIP_MRPROPER=1 SKIP_CP_KERNEL_HDR=1 \
 BUILD_CONFIG=common/build.config.gki.aarch64 \
-OUT_DIR=~/kernel-sources/out-zram \
+OUT_DIR=~/kernel-sources/out \
 bash build/build.sh -j12
 ```
 
-细节、硬门禁（7298 个导出符号 CRC、355 个 vendor_boot + 315 个 vendor_dlkm 模块、CONFIG 和结构体布局）见 [`source/README.gki-docker.md`](source/README.gki-docker.md)。
+构建前建议清空 `OUT_DIR`。增量构建会复用 ThinLTO 缓存，`/proc/config.gz`
+可能留在上一次的配置数据上。
 
-## 状态（2026-10-29）
-
-| 项目 | 结果 |
-| --- | --- |
-| 开机 / KernelSU | 正常（`boot_272_p1p4.img`，420 个模块） |
-| 导出符号 CRC | 7298 个，与 5.10.272 基线差异 0 |
-| vendor_boot 模块 | 355 个，加载失败 0 |
-| vendor_dlkm 模块 | 315 个 .ko，CRC 不匹配 0 |
-| CFS_BANDWIDTH / CPU 限制 | 已开启（kABI 拆分），Droidspaces `--cpus` 可用 |
-| P0/P1/P2 修复 | 模块 CRC 拒绝恢复；`next_id` side table；`netns_ipv4` pin；ntsync timens/owner |
-| 0046-0048 | cfs_rq 指针在尾部填充 472（vendor 数据 344）；bbr3 `cwnd_event` 空指针保护；futex_waitv 定时器 |
-| CRIU / FHANDLE | `UNIX_DIAG`/`PACKET_DIAG`/`NETLINK_DIAG` 和 `FHANDLE` 已开启；容器不要给 `CAP_DAC_READ_SEARCH` |
-| 行为测试 | verify 41 PASS / 3 FAIL（脚本误报：`/proc/config.gz` 内嵌旧配置、ipvlan SELinux、旧 `ss`）；ntsync 10/11（`stress_wait` 为测试程序问题）、owner 2/2、futex 7/7、epoll 63/63 |
-| 32 位 futex_waitv | 已接线（syscall 449） |
-| 内核默认值 | 保持 stock：cubic、vendor 调度器、zram `lz4` |
-| 运行时开关 | 由 `yudi-tweaks` 模块开启（BBRv3、le9uo、zram `lz4kd`、KSM、ADIOS、DAMON） |
+硬门禁和测试方法见 [docs/kernel.md](docs/kernel.md)。
 
 ## 刷机
 
+镜像有两个版本，内核相同，ramdisk 不同：
+
+| 镜像 | 内容 |
+| --- | --- |
+| `yudi-5.10.272-20261029-ksu.img` | KernelSU |
+| `yudi-5.10.272-20261029-noroot.img` | 无 root |
+
 ```sh
 adb reboot bootloader
-fastboot flash boot_a boot_272_p1p4.img
+fastboot flash boot_a yudi-5.10.272-20261029-ksu.img
 fastboot reboot
 ```
 
-`boot_272_p1p4.img` 是 5.10.272 + KernelSU + CFS_BANDWIDTH + P0/P1/P2 + 0046-0048 + CRIU/FHANDLE 的验证镜像。回退镜像为 `boot_272_p1p3.img`、`boot_272_p1p2.img`、`boot_272_p0.img`、`boot_272_simple.img`，stock 备份为 `boot_backup_pre_simple.img`（5.10.237 + Magisk）。刷机前请自行备份当前 `boot_a`。
+只动 `boot_a`。`vendor_boot`、`vendor_dlkm`、`dtbo` 都不需要改。
+
+## 补丁
+
+补丁在 `patches/`，基线是 `a1eed2e9c`（5.10.272 合并提交）。按 `series`
+顺序应用：
+
+```sh
+cd common
+git checkout a1eed2e9c
+while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series"
+```
 
 ## KernelSU 模块
 
-源码和 zip：<https://github.com/OneFeiFan/yudi-ksu-modules>。`yudi-tweaks` v1.4 默认只开安全项（sysctl、BBRv3、le9uo、zram），KSM、ADIOS、DAMON 在 WebUI 的“高级选项”里手动开启；WebUI 还显示 CPU 限制（CFS_BANDWIDTH）和 ntsync 状态。`ntsync` v1.1 按 `/sys/class/misc/ntsync/dev` 创建节点。配置在重启后生效。
+源码和 zip：<https://github.com/OneFeiFan/yudi-ksu-modules>
+
+| 模块 | 说明 |
+| --- | --- |
+| `yudi-tweaks` | 运行时开关和状态页（BBRv3、le9uo、zram、KSM、ADIOS、DAMON） |
+| `ntsync` | 按 `/sys/class/misc/ntsync/dev` 创建 `/dev/ntsync` |
+
+## 验证
+
+- 7298 个导出符号，与 5.10.272 基线 CRC 差异 0
+- 355 个 `vendor_boot` 模块、315 个 `vendor_dlkm` 模块，CRC 不匹配 0
+- 设备开机 420 个模块，`dmesg` 无 CRC 或 WARNING
+- NTSync v2 自测 11/11，futex_waitv 7/7，epoll 63/63
+- CFS 带宽 20% 配额下 `nr_throttled` 正常增长，zram 各算法往返一致
+
+verify 脚本还有两个已知误报：ipvlan 用例在同一个 dummy 上先建 macvlan 再建
+ipvlan（两者争用 RX handler，必然 EBUSY）；设备自带的 `ss` 是
+iproute2-ss171113，看不到 bbr3 诊断，用 Termux 的 iproute2 7.3.0 可复测。
+
+## 参考
+
+- AOSP `android12-5.10-lts`
+- KernelSU
+- SukiSU Ultra zram（LZ4K/LZ4KD）
+- WildKernels android12-5.10 BBRv3
+- ESK GKI `block/adios.c`
+- le9uo
+- linux-tkg futex_waitv 回移
+- Goldzxcbug/Droidspaces_Kernel_patch（CFS 带宽 kABI 拆分）
 
 ## License
 

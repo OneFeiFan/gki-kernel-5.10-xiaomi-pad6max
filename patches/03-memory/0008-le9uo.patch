@@ -1,9 +1,9 @@
-From d65fc915b7258b2d9c9a5815cc574a3c8bccb349 Mon Sep 17 00:00:00 2001
+From f77609a7009e63bf400531c46acb51df63cde9ca Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
-Date: Mon, 26 Oct 2026 00:12:38 +0800
-Subject: [PATCH] phase10.2: add le9uo working-set protection
+Date: Thu, 29 Oct 2026 01:52:56 +0800
+Subject: [PATCH] mm: add le9uo working-set protection
 
-Backport the android12-5.10 le9uo patch. Enable the default protection (anon 15%, clean file 15%) so memory pressure preserves the working set. Gates: 7298 baseline symbols unchanged, 355 vendor modules 0 failures, boot + sysctls, /dev/ntsync still present.
+Add the le9uo workingset_protection sysctl and the reclaim tweak. The kernel default is 1; the KernelSU module can turn it off at boot.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 ---

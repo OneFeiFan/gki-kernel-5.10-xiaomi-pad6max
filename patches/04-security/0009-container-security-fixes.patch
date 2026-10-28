@@ -1,9 +1,9 @@
-From e7b167847b4ce881a1bbcc5f01da44701d768531 Mon Sep 17 00:00:00 2001
+From 078d0b23dda550179faaec9cb1940cc78fb7ab8d Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
-Date: Mon, 26 Oct 2026 00:24:22 +0800
-Subject: [PATCH] phase10.3: backport container-relevant security fixes
+Date: Thu, 29 Oct 2026 01:52:56 +0800
+Subject: [PATCH] fs, net: backport container-relevant security fixes
 
-dcache: refuse a mountpoint on a dentry being removed. overlayfs: verify copy_file_range source with source-mounter creds (include fs/internal.h for 5.10). nfnetlink_log: move nf_log_unset to pre_exit. cpuset: cache v2 mode at bind time instead of reading the root flags later. Gates: 7298 baseline symbols unchanged, 355 vendor modules 0 failures, boot + le9uo sysctls + ntsync node.
+Backport the dcache, overlayfs, cpuset and nfnetlink_log fixes that matter for containers.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 ---

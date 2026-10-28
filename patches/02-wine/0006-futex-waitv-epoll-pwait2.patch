@@ -1,25 +1,264 @@
-From e970ecb928785a260d630a0ea3e85b35183f1378 Mon Sep 17 00:00:00 2001
+From c3a9d9ba2303faae888d46ece8123849f252f459 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
-Date: Mon, 26 Oct 2026 21:20:06 +0800
-Subject: [PATCH] phase10.11: backport futex_waitv syscall
+Date: Thu, 29 Oct 2026 01:52:55 +0800
+Subject: [PATCH] futex, epoll: backport futex_waitv and epoll_pwait2
 
-Backport the 5.16 futex_waitv() interface (syscall 449) on top of Android 12-5.10 split kernel/futex/core.c. Wine/Proton use it to implement WaitForMultipleObjects without several separate futex waits.
-
-The 5.10 tree lacks futex_init_timeout(), so the absolute timeout conversion is inlined. Only the 64-bit ABI is wired; the arm64 compat table is left alone, so 32-bit callers still get ENOSYS.
-
-Tested on yudi with a static aarch64 binary: nr=0 -> EINVAL, mismatched value -> EAGAIN, matching value with expired timeout -> ETIMEDOUT.
+Backport futex_waitv with the 64-bit and 32-bit compat syscalls, and epoll_pwait2. futex_waitv also destroys the on-stack timer when kcalloc() fails, matching upstream 94cd8fa09f5f.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 ---
- include/linux/syscalls.h          |   5 +
- include/uapi/asm-generic/unistd.h |   4 +-
+ arch/arm64/include/asm/unistd.h   |   2 +-
+ arch/arm64/include/asm/unistd32.h |   4 +
+ fs/eventpoll.c                    | 127 ++++++++---
+ include/linux/syscalls.h          |  10 +
+ include/uapi/asm-generic/unistd.h |   6 +-
  include/uapi/linux/futex.h        |  25 +++
- kernel/futex/core.c               | 331 ++++++++++++++++++++++++++++++
- kernel/sys_ni.c                   |   1 +
- 5 files changed, 365 insertions(+), 1 deletion(-)
+ kernel/futex/core.c               | 352 ++++++++++++++++++++++++++++++
+ kernel/sys_ni.c                   |   2 +
+ 8 files changed, 499 insertions(+), 29 deletions(-)
 
+diff --git a/arch/arm64/include/asm/unistd.h b/arch/arm64/include/asm/unistd.h
+index 3cb206aea..6bdb5f5db 100644
+--- a/arch/arm64/include/asm/unistd.h
++++ b/arch/arm64/include/asm/unistd.h
+@@ -38,7 +38,7 @@
+ #define __ARM_NR_compat_set_tls		(__ARM_NR_COMPAT_BASE + 5)
+ #define __ARM_NR_COMPAT_END		(__ARM_NR_COMPAT_BASE + 0x800)
+ 
+-#define __NR_compat_syscalls		449
++#define __NR_compat_syscalls		450
+ #endif
+ 
+ #define __ARCH_WANT_SYS_CLONE
+diff --git a/arch/arm64/include/asm/unistd32.h b/arch/arm64/include/asm/unistd32.h
+index 7a869335d..45b307d8f 100644
+--- a/arch/arm64/include/asm/unistd32.h
++++ b/arch/arm64/include/asm/unistd32.h
+@@ -889,8 +889,12 @@ __SYSCALL(__NR_pidfd_getfd, sys_pidfd_getfd)
+ __SYSCALL(__NR_faccessat2, sys_faccessat2)
+ #define __NR_process_madvise 440
+ __SYSCALL(__NR_process_madvise, sys_process_madvise)
++#define __NR_epoll_pwait2 441
++__SYSCALL(__NR_epoll_pwait2, compat_sys_epoll_pwait2)
+ #define __NR_process_mrelease 448
+ __SYSCALL(__NR_process_mrelease, sys_process_mrelease)
++#define __NR_futex_waitv 449
++__SYSCALL(__NR_futex_waitv, compat_sys_futex_waitv)
+ 
+ /*
+  * Please add new compat syscalls above this comment and update
+diff --git a/fs/eventpoll.c b/fs/eventpoll.c
+index 3114ab294..c69d46133 100644
+--- a/fs/eventpoll.c
++++ b/fs/eventpoll.c
+@@ -1806,15 +1806,25 @@ static int ep_send_events(struct eventpoll *ep,
+ 	return esed.res;
+ }
+ 
+-static inline struct timespec64 ep_set_mstimeout(long ms)
++static struct timespec64 *ep_timeout_to_timespec(struct timespec64 *to, long ms)
+ {
+-	struct timespec64 now, ts = {
+-		.tv_sec = ms / MSEC_PER_SEC,
+-		.tv_nsec = NSEC_PER_MSEC * (ms % MSEC_PER_SEC),
+-	};
++	struct timespec64 now;
++
++	if (ms < 0)
++		return NULL;
++
++	if (!ms) {
++		to->tv_sec = 0;
++		to->tv_nsec = 0;
++		return to;
++	}
++
++	to->tv_sec = ms / MSEC_PER_SEC;
++	to->tv_nsec = NSEC_PER_MSEC * (ms % MSEC_PER_SEC);
+ 
+ 	ktime_get_ts64(&now);
+-	return timespec64_add_safe(now, ts);
++	*to = timespec64_add_safe(now, *to);
++	return to;
+ }
+ 
+ /*
+@@ -1845,8 +1855,8 @@ static int ep_autoremove_wake_function(struct wait_queue_entry *wq_entry,
+  *          stored.
+  * @maxevents: Size (in terms of number of events) of the caller event buffer.
+  * @timeout: Maximum timeout for the ready events fetch operation, in
+- *           milliseconds. If the @timeout is zero, the function will not block,
+- *           while if the @timeout is less than zero, the function will block
++ *           timespec. If the timeout is zero, the function will not block,
++ *           while if the @timeout ptr is NULL, the function will block
+  *           until at least one event has been retrieved (or an error
+  *           occurred).
+  *
+@@ -1854,7 +1864,7 @@ static int ep_autoremove_wake_function(struct wait_queue_entry *wq_entry,
+  *          error code, in case of error.
+  */
+ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
+-		   int maxevents, long timeout)
++		   int maxevents, struct timespec64 *timeout)
+ {
+ 	int res = 0, eavail, timed_out = 0;
+ 	u64 slack = 0;
+@@ -1863,13 +1873,11 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
+ 
+ 	lockdep_assert_irqs_enabled();
+ 
+-	if (timeout > 0) {
+-		struct timespec64 end_time = ep_set_mstimeout(timeout);
+-
+-		slack = select_estimate_accuracy(&end_time);
++	if (timeout && (timeout->tv_sec | timeout->tv_nsec)) {
++		slack = select_estimate_accuracy(timeout);
+ 		to = &expires;
+-		*to = timespec64_to_ktime(end_time);
+-	} else if (timeout == 0) {
++		*to = timespec64_to_ktime(*timeout);
++	} else if (timeout) {
+ 		/*
+ 		 * Avoid the unnecessary trip to the wait queue loop, if the
+ 		 * caller specified a non blocking operation. We still need
+@@ -2338,7 +2346,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
+  * part of the user space epoll_wait(2).
+  */
+ static int do_epoll_wait(int epfd, struct epoll_event __user *events,
+-			 int maxevents, int timeout)
++			 int maxevents, struct timespec64 *to)
+ {
+ 	int error;
+ 	struct fd f;
+@@ -2372,7 +2380,7 @@ static int do_epoll_wait(int epfd, struct epoll_event __user *events,
+ 	ep = f.file->private_data;
+ 
+ 	/* Time to fish for events ... */
+-	error = ep_poll(ep, events, maxevents, timeout);
++	error = ep_poll(ep, events, maxevents, to);
+ 
+ error_fput:
+ 	fdput(f);
+@@ -2382,16 +2390,19 @@ static int do_epoll_wait(int epfd, struct epoll_event __user *events,
+ SYSCALL_DEFINE4(epoll_wait, int, epfd, struct epoll_event __user *, events,
+ 		int, maxevents, int, timeout)
+ {
+-	return do_epoll_wait(epfd, events, maxevents, timeout);
++	struct timespec64 to;
++
++	return do_epoll_wait(epfd, events, maxevents,
++			     ep_timeout_to_timespec(&to, timeout));
+ }
+ 
+ /*
+  * Implement the event wait interface for the eventpoll file. It is the kernel
+  * part of the user space epoll_pwait(2).
+  */
+-SYSCALL_DEFINE6(epoll_pwait, int, epfd, struct epoll_event __user *, events,
+-		int, maxevents, int, timeout, const sigset_t __user *, sigmask,
+-		size_t, sigsetsize)
++static int do_epoll_pwait(int epfd, struct epoll_event __user *events,
++			  int maxevents, struct timespec64 *to,
++			  const sigset_t __user *sigmask, size_t sigsetsize)
+ {
+ 	int error;
+ 
+@@ -2403,18 +2414,46 @@ SYSCALL_DEFINE6(epoll_pwait, int, epfd, struct epoll_event __user *, events,
+ 	if (error)
+ 		return error;
+ 
+-	error = do_epoll_wait(epfd, events, maxevents, timeout);
++	error = do_epoll_wait(epfd, events, maxevents, to);
+ 	restore_saved_sigmask_unless(error == -EINTR);
+ 
+ 	return error;
+ }
+ 
++SYSCALL_DEFINE6(epoll_pwait, int, epfd, struct epoll_event __user *, events,
++		int, maxevents, int, timeout, const sigset_t __user *, sigmask,
++		size_t, sigsetsize)
++{
++	struct timespec64 to;
++
++	return do_epoll_pwait(epfd, events, maxevents,
++			      ep_timeout_to_timespec(&to, timeout),
++			      sigmask, sigsetsize);
++}
++
++SYSCALL_DEFINE6(epoll_pwait2, int, epfd, struct epoll_event __user *, events,
++		int, maxevents, const struct __kernel_timespec __user *, timeout,
++		const sigset_t __user *, sigmask, size_t, sigsetsize)
++{
++	struct timespec64 ts, *to = NULL;
++
++	if (timeout) {
++		if (get_timespec64(&ts, timeout))
++			return -EFAULT;
++		to = &ts;
++		if (poll_select_set_timeout(to, ts.tv_sec, ts.tv_nsec))
++			return -EINVAL;
++	}
++
++	return do_epoll_pwait(epfd, events, maxevents, to,
++			      sigmask, sigsetsize);
++}
++
+ #ifdef CONFIG_COMPAT
+-COMPAT_SYSCALL_DEFINE6(epoll_pwait, int, epfd,
+-			struct epoll_event __user *, events,
+-			int, maxevents, int, timeout,
+-			const compat_sigset_t __user *, sigmask,
+-			compat_size_t, sigsetsize)
++static int do_compat_epoll_pwait(int epfd, struct epoll_event __user *events,
++				 int maxevents, struct timespec64 *timeout,
++				 const compat_sigset_t __user *sigmask,
++				 compat_size_t sigsetsize)
+ {
+ 	long err;
+ 
+@@ -2431,6 +2470,40 @@ COMPAT_SYSCALL_DEFINE6(epoll_pwait, int, epfd,
+ 
+ 	return err;
+ }
++
++COMPAT_SYSCALL_DEFINE6(epoll_pwait, int, epfd,
++		       struct epoll_event __user *, events,
++		       int, maxevents, int, timeout,
++		       const compat_sigset_t __user *, sigmask,
++		       compat_size_t, sigsetsize)
++{
++	struct timespec64 to;
++
++	return do_compat_epoll_pwait(epfd, events, maxevents,
++				     ep_timeout_to_timespec(&to, timeout),
++				     sigmask, sigsetsize);
++}
++
++COMPAT_SYSCALL_DEFINE6(epoll_pwait2, int, epfd,
++		       struct epoll_event __user *, events,
++		       int, maxevents,
++		       const struct __kernel_timespec __user *, timeout,
++		       const compat_sigset_t __user *, sigmask,
++		       compat_size_t, sigsetsize)
++{
++	struct timespec64 ts, *to = NULL;
++
++	if (timeout) {
++		if (get_timespec64(&ts, timeout))
++			return -EFAULT;
++		to = &ts;
++		if (poll_select_set_timeout(to, ts.tv_sec, ts.tv_nsec))
++			return -EINVAL;
++	}
++
++	return do_compat_epoll_pwait(epfd, events, maxevents, to,
++				     sigmask, sigsetsize);
++}
+ #endif
+ 
+ static int __init eventpoll_init(void)
 diff --git a/include/linux/syscalls.h b/include/linux/syscalls.h
-index 478b827bc..b98db1ef1 100644
+index 478b827bc..fb30e8962 100644
 --- a/include/linux/syscalls.h
 +++ b/include/linux/syscalls.h
 @@ -58,6 +58,7 @@ struct mq_attr;
@@ -30,7 +269,19 @@ index 478b827bc..b98db1ef1 100644
  struct getcpu_cache;
  struct old_linux_dirent;
  struct perf_event_attr;
-@@ -617,6 +618,10 @@ asmlinkage long sys_get_robust_list(int pid,
+@@ -391,6 +392,11 @@ asmlinkage long sys_epoll_pwait(int epfd, struct epoll_event __user *events,
+ 				int maxevents, int timeout,
+ 				const sigset_t __user *sigmask,
+ 				size_t sigsetsize);
++asmlinkage long sys_epoll_pwait2(int epfd, struct epoll_event __user *events,
++				int maxevents,
++				const struct __kernel_timespec __user *timeout,
++				const sigset_t __user *sigmask,
++				size_t sigsetsize);
+ 
+ /* fs/fcntl.c */
+ asmlinkage long sys_dup(unsigned int fildes);
+@@ -617,6 +623,10 @@ asmlinkage long sys_get_robust_list(int pid,
  				    size_t __user *len_ptr);
  asmlinkage long sys_set_robust_list(struct robust_list_head __user *head,
  				    size_t len);
@@ -42,11 +293,15 @@ index 478b827bc..b98db1ef1 100644
  /* kernel/hrtimer.c */
  asmlinkage long sys_nanosleep(struct __kernel_timespec __user *rqtp,
 diff --git a/include/uapi/asm-generic/unistd.h b/include/uapi/asm-generic/unistd.h
-index 03fb22304..9865be105 100644
+index 03fb22304..db1f2e9b1 100644
 --- a/include/uapi/asm-generic/unistd.h
 +++ b/include/uapi/asm-generic/unistd.h
-@@ -861,9 +861,11 @@ __SYSCALL(__NR_faccessat2, sys_faccessat2)
+@@ -859,11 +859,15 @@ __SYSCALL(__NR_pidfd_getfd, sys_pidfd_getfd)
+ __SYSCALL(__NR_faccessat2, sys_faccessat2)
+ #define __NR_process_madvise 440
  __SYSCALL(__NR_process_madvise, sys_process_madvise)
++#define __NR_epoll_pwait2 441
++__SYSCALL(__NR_epoll_pwait2, sys_epoll_pwait2)
  #define __NR_process_mrelease 448
  __SYSCALL(__NR_process_mrelease, sys_process_mrelease)
 +#define __NR_futex_waitv 449
@@ -95,10 +350,10 @@ index a89eb0acc..8250a93c3 100644
   * Support for robust futexes: the kernel cleans up held futexes at
   * thread exit time.
 diff --git a/kernel/futex/core.c b/kernel/futex/core.c
-index 012d837a6..c5b19a6a6 100644
+index 012d837a6..db7708599 100644
 --- a/kernel/futex/core.c
 +++ b/kernel/futex/core.c
-@@ -4018,6 +4018,337 @@ COMPAT_SYSCALL_DEFINE3(get_robust_list, int, pid,
+@@ -4018,6 +4018,358 @@ COMPAT_SYSCALL_DEFINE3(get_robust_list, int, pid,
  }
  #endif /* CONFIG_COMPAT */
  
@@ -373,9 +628,10 @@ index 012d837a6..c5b19a6a6 100644
 + * same event, and if more than one futex was woken, the returned index may
 + * refer to any one of them.
 + */
-+SYSCALL_DEFINE5(futex_waitv, struct futex_waitv __user *, waiters,
-+		unsigned int, nr_futexes, unsigned int, flags,
-+		struct __kernel_timespec __user *, timeout, clockid_t, clockid)
++static long __futex_waitv(struct futex_waitv __user *waiters,
++			  unsigned int nr_futexes, unsigned int flags,
++			  struct __kernel_timespec __user *timeout,
++			  clockid_t clockid)
 +{
 +	struct hrtimer_sleeper to;
 +	struct futex_vector *futexv;
@@ -417,30 +673,58 @@ index 012d837a6..c5b19a6a6 100644
 +	}
 +
 +	futexv = kcalloc(nr_futexes, sizeof(*futexv), GFP_KERNEL);
-+	if (!futexv)
-+		return -ENOMEM;
++	if (!futexv) {
++		ret = -ENOMEM;
++		goto destroy_timer;
++	}
 +
 +	ret = futex_parse_waitv(futexv, waiters, nr_futexes);
 +	if (!ret)
 +		ret = futex_wait_multiple(futexv, nr_futexes, timeout ? &to : NULL);
 +
++	kfree(futexv);
++
++destroy_timer:
 +	if (timeout) {
 +		hrtimer_cancel(&to.timer);
 +		destroy_hrtimer_on_stack(&to.timer);
 +	}
-+
-+	kfree(futexv);
 +	return ret;
 +}
++
++SYSCALL_DEFINE5(futex_waitv, struct futex_waitv __user *, waiters,
++		unsigned int, nr_futexes, unsigned int, flags,
++		struct __kernel_timespec __user *, timeout, clockid_t, clockid)
++{
++	return __futex_waitv(waiters, nr_futexes, flags, timeout, clockid);
++}
++
++#ifdef CONFIG_COMPAT
++COMPAT_SYSCALL_DEFINE5(futex_waitv, compat_uptr_t, waiters,
++		       unsigned int, nr_futexes, unsigned int, flags,
++		       compat_uptr_t, timeout, clockid_t, clockid)
++{
++	return __futex_waitv(compat_ptr(waiters), nr_futexes, flags,
++			     compat_ptr(timeout), clockid);
++}
++#endif
 +
  #ifdef CONFIG_COMPAT_32BIT_TIME
  SYSCALL_DEFINE6(futex_time32, u32 __user *, uaddr, int, op, u32, val,
  		struct old_timespec32 __user *, utime, u32 __user *, uaddr2,
 diff --git a/kernel/sys_ni.c b/kernel/sys_ni.c
-index 8ae259772..d593f5853 100644
+index 8ae259772..26b677d57 100644
 --- a/kernel/sys_ni.c
 +++ b/kernel/sys_ni.c
-@@ -147,6 +147,7 @@ COND_SYSCALL(set_robust_list);
+@@ -67,6 +67,7 @@ COND_SYSCALL(eventfd2);
+ COND_SYSCALL(epoll_create1);
+ COND_SYSCALL(epoll_ctl);
+ COND_SYSCALL(epoll_pwait);
++COND_SYSCALL(epoll_pwait2);
+ COND_SYSCALL_COMPAT(epoll_pwait);
+ 
+ /* fs/fcntl.c */
+@@ -147,6 +148,7 @@ COND_SYSCALL(set_robust_list);
  COND_SYSCALL_COMPAT(set_robust_list);
  COND_SYSCALL(get_robust_list);
  COND_SYSCALL_COMPAT(get_robust_list);

@@ -1,0 +1,50 @@
+From 3fc385c09c15af3bb0cfa2d8912ce12274756737 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Thu, 29 Oct 2026 01:52:55 +0800
+Subject: [PATCH] block: overlay block throttling state on the KABI reserve
+
+CONFIG_BLK_DEV_THROTTLING needs a throtl_data pointer in struct request_queue. Overlay it on ANDROID_KABI_RESERVE(1) and hide it from genksyms so request_queue keeps its stock CRC.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ include/linux/blkdev.h | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+index 961bfbf54..198142db9 100644
+--- a/include/linux/blkdev.h
++++ b/include/linux/blkdev.h
+@@ -573,10 +573,6 @@ struct request_queue {
+ 	struct bsg_class_device bsg_dev;
+ #endif
+ 
+-#ifdef CONFIG_BLK_DEV_THROTTLING
+-	/* Throttle data */
+-	struct throtl_data *td;
+-#endif
+ 	struct rcu_head		rcu_head;
+ 	wait_queue_head_t	mq_freeze_wq;
+ 	/*
+@@ -603,7 +599,22 @@ struct request_queue {
+ #define BLK_MAX_WRITE_HINTS	5
+ 	u64			write_hints[BLK_MAX_WRITE_HINTS];
+ 
++	/*
++	 * Throttle data overlays KABI reserve 1; hidden from genksyms so
++	 * request_queue's KMI CRC stays at the stock value.
++	 */
++#if defined(CONFIG_BLK_DEV_THROTTLING) && !defined(__GENKSYMS__)
++	union {
++		struct {
++			ANDROID_KABI_RESERVE(1);
++		};
++		struct {
++			struct throtl_data *td;
++		};
++	};
++#else
+ 	ANDROID_KABI_RESERVE(1);
++#endif
+ 	ANDROID_KABI_RESERVE(2);
+ 	ANDROID_KABI_RESERVE(3);
+ 	ANDROID_KABI_RESERVE(4);
