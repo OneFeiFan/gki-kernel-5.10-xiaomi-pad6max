@@ -38,21 +38,34 @@ python3 tools/abi_layout_check.py out/dist/vmlinux
 - 无 root：把 `Image` 和 Google GKI 认证镜像
   （`gki-certified-boot-android12-5.10-*.zip` 里的 `boot-5.10.img`）的 ramdisk
   重新打包。
-- 有 root：先打无 root 镜像，再用设备上的 `ksud boot-patch-v2` 打 KernelSU。
+- 有 root：从 `ksud boot-patch`（v1）生成的 KernelSU 镜像里取出 ramdisk，再和
+  本项目的 `Image` 重新打包。
 
 ```sh
+# 无 root
 python3 mkbootimg.py --header_version 4 \
   --kernel out/dist/Image \
   --ramdisk gki/unpack/ramdisk \
-  --os_version 12.0.0 --os_patch_level 2099-12 \
+  --os_version 12.0.0 --os_patch_level 2025-09 \
   -o yudi-noroot.img
 
-ksud boot-patch-v2 -b yudi-noroot.img -o yudi-ksu.img
+# 有 root（先取得 KernelSU ramdisk，再换成本项目的 Image）
+ksud boot-patch -b gki/boot-5.10.img -o /data/local/tmp
+python3 mkbootimg.py --header_version 4 \
+  --kernel out/dist/Image \
+  --ramdisk ksu/ramdisk \
+  --os_version 12.0.0 --os_patch_level 2025-09 \
+  -o yudi-ksu.img
 ```
 
+`--os_version 12.0.0 --os_patch_level 2025-09` 与原厂 `boot.img` 的头部一致。
+Google 的 GKI 认证镜像自带 `2099-12`，不要沿用它。设备上 KeyAttestation 显示的
+boot patch level 由 TEE 维护（2026-02-01），与这个头字段无关；保持原厂值可以
+避免不同引导程序或 Keymaster 实现上的未知行为。
+
 `boot-5.10.img` 的内核镜像在 `image_size` 之后带 BTF/元数据，`ksud boot-patch-v2`
-会拒绝这种输入。先用 `ksud boot-patch`（v1）在官方镜像上生成 KernelSU 的
-ramdisk，再用 `mkbootimg` 把 ramdisk 和本项目的 `Image` 重新组合。
+会拒绝这种输入；本项目的 `Image` 还带 CFI 别名，v2 会报符号不唯一。因此 root
+镜像固定用 v1 生成 ramdisk，再用 `mkbootimg` 组合。
 
 ## 行为测试
 
