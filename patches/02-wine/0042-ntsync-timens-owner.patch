@@ -1,0 +1,49 @@
+From 8d24e9bfa7a29e2c35f34fb1cab7f889a99438bd Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Wed, 28 Oct 2026 22:41:27 +0800
+Subject: [PATCH] ntsync: honor time namespaces and require an owner
+
+Convert the monotonic wait timeout with timens_ktime_to_host() so waits
+inside a time namespace use the host clock, and reject wait requests
+with owner == 0, matching the upstream driver.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ drivers/misc/ntsync.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/misc/ntsync.c b/drivers/misc/ntsync.c
+index 245a21362..7ab75176e 100644
+--- a/drivers/misc/ntsync.c
++++ b/drivers/misc/ntsync.c
+@@ -11,6 +11,7 @@
+ #include <linux/fs.h>
+ #include <linux/hrtimer.h>
+ #include <linux/ktime.h>
++#include <linux/time_namespace.h>
+ #include <linux/miscdevice.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+@@ -859,8 +860,11 @@ static int ntsync_schedule(const struct ntsync_q *q, const struct ntsync_wait_ar
+ 
+ 	timeout_ptr = (args->timeout == U64_MAX ? NULL : &timeout);
+ 
+-	if (args->flags & NTSYNC_WAIT_REALTIME)
++	if (args->flags & NTSYNC_WAIT_REALTIME) {
+ 		clock = CLOCK_REALTIME;
++	} else if (args->timeout != U64_MAX) {
++		timeout = timens_ktime_to_host(clock, timeout);
++	}
+ 
+ 	do {
+ 		if (signal_pending(current)) {
+@@ -897,6 +901,9 @@ static int setup_wait(struct ntsync_device *dev,
+ 	if (args->pad || (args->flags & ~NTSYNC_WAIT_REALTIME))
+ 		return -EINVAL;
+ 
++	if (!args->owner)
++		return -EINVAL;
++
+ 	if (size >= sizeof(fds))
+ 		return -EINVAL;
+ 

@@ -7,7 +7,7 @@
 - AOSP `android12-5.10-lts`，5.10.272 合并提交：`a1eed2e9c`
   （`Merge 5.10.272 into android12-5.10-lts`）
 - 应用本目录的 `series` 后，应得到当前仓库的内核源码树；
-  实测 tree 哈希为 `f6d526cd8abb2cea12731048696d885f521855b6`
+  实测 tree 哈希为 `ab671f084a6c5fc582669064062a493e7d7461a9`
   （不含 `patches/` 目录本身）。
 
 ## 应用方法
@@ -44,6 +44,7 @@ while read p; do git apply "$PATCHES/$p"; done < "$PATCHES/series"
 | `07-block/` | ADIOS 调度器、blk-mq hctx 顺序修复、ADIOS 默认（0035 已撤销默认） |
 | `08-syscalls/` | epoll_pwait2 |
 | `09-docs/` | README 文档更新（只改 `README.gki-docker.md`） |
+| `10-sched/` | CFS_BANDWIDTH kABI 拆分（CPU 限制） |
 
 ## 补丁索引
 
@@ -86,13 +87,19 @@ while read p; do git apply "$PATCHES/$p"; done < "$PATCHES/series"
 | `00-platform/0035-restore-stock-runtime-defaults.patch` | `71369082a` | gki_defconfig: restore stock runtime defaults, tune via modules |
 | `09-docs/0036-docs-32bit-futex-defaults.patch` | `c0e74a0ce` | docs: document 32-bit futex_waitv and module-owned defaults |
 | `09-docs/0037-docs-repo-layout-paths.patch` | `deac26940` | docs: point patch instructions at the restructured repo |
+| `10-sched/0038-sched-cfs-bandwidth-kabi.patch` | `100e06d77` | sched: add kABI-safe CFS bandwidth support |
+| `00-platform/0039-module-reject-crc-mismatch.patch` | `9d5a1db2a` | module: reject CRC mismatches again |
+| `01-container/0040-ipc-next-id-side-table.patch` | `741ae7d94` | ipc: move next_id out of struct ipc_ids |
+| `06-network/0041-net-pin-netns-ipv4-layout.patch` | `fd1dc1507` | net: pin the stock netns_ipv4 layout |
+| `02-wine/0042-ntsync-timens-owner.patch` | `8d24e9bfa` | ntsync: honor time namespaces and require an owner |
+| `00-platform/0043-gki-defconfig-drop-module-sig.patch` | `8224e8c44` | gki_defconfig: drop the redundant MODULE_SIG=n line |
+| `09-docs/0044-docs-cfs-p0-p1p2-gates.patch` | `a11d79383` | docs: document the CFS/P0/P1/P2 gates and layout pins |
 
 ## 验证
 
 - 每个补丁保留原提交的作者和提交信息，`git am` 会重建对应提交。
-- 应用完 `series` 后，内核源码树（不含 `patches/` 目录）应与提交 `deac26940`
-  的 tree 一致：`f6d526cd8abb2cea12731048696d885f521855b6`
-  （实测在 `a1eed2e9c` 上按 `series` 顺序 `git am` 37 个补丁，得到同一 tree；
+- 应用完 `series` 后，内核源码树（不含 `patches/` 目录）应与提交 `a11d79383`
+  的 tree 一致：`ab671f084a6c5fc582669064062a493e7d7461a9`
+  （实测在 `a1eed2e9c` 上按 `series` 顺序 `git am` 44 个补丁，得到同一 tree；
   `09-docs` 只改 README；`patches/` 目录本身不在补丁里）。
-- 本项目的硬门禁：7298 个基线导出符号 CRC 差异为 0；355 个 vendor_boot
-  模块 0 失败。详见 `README.gki-docker.md`。
+- 本项目的硬门禁：7298 个基线导出符号 CRC 差异为 0；355 个 vendor_boot 和 315 个 vendor_dlkm 模块 0 失败。详见 `README.gki-docker.md`。

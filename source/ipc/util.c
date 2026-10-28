@@ -61,6 +61,8 @@
 #include <linux/audit.h>
 #include <linux/nsproxy.h>
 #include <linux/rwsem.h>
+#include <linux/spinlock.h>
+#include <linux/list.h>
 #include <linux/memory.h>
 #include <linux/ipc_namespace.h>
 #include <linux/rhashtable.h>
@@ -104,6 +106,110 @@ static const struct rhashtable_params ipc_kht_params = {
 	.automatic_shrinking	= true,
 };
 
+#ifdef CONFIG_CHECKPOINT_RESTORE
+/*
+ * The checkpoint/restore next_id lives outside struct ipc_ids so that
+ * enabling CONFIG_CHECKPOINT_RESTORE keeps the stock GKI layout (key_ht
+ * at offset 104, sizeof(struct ipc_ids) == 272). The table is keyed by
+ * the ipc_ids pointer; one entry per identifier set (three per ipc
+ * namespace). Entries are created in ipc_init_ids() and removed in
+ * free_ipcs().
+ */
+struct ipc_next_id {
+	struct hlist_node	node;
+	struct ipc_ids		*ids;
+	int			next_id;
+};
+
+static DEFINE_SPINLOCK(ipc_next_id_lock);
+static HLIST_HEAD(ipc_next_id_list);
+
+static struct ipc_next_id *ipc_next_id_find(struct ipc_ids *ids)
+{
+	struct ipc_next_id *entry;
+
+	hlist_for_each_entry(entry, &ipc_next_id_list, node) {
+		if (entry->ids == ids)
+			return entry;
+	}
+	return NULL;
+}
+
+void ipc_next_id_init(struct ipc_ids *ids)
+{
+	struct ipc_next_id *entry = kmalloc(sizeof(*entry), GFP_KERNEL);
+
+	if (!entry)
+		return;
+	entry->ids = ids;
+	entry->next_id = -1;
+
+	spin_lock(&ipc_next_id_lock);
+	if (ipc_next_id_find(ids)) {
+		spin_unlock(&ipc_next_id_lock);
+		kfree(entry);
+		return;
+	}
+	hlist_add_head(&entry->node, &ipc_next_id_list);
+	spin_unlock(&ipc_next_id_lock);
+}
+
+void ipc_next_id_free(struct ipc_ids *ids)
+{
+	struct ipc_next_id *entry;
+
+	spin_lock(&ipc_next_id_lock);
+	entry = ipc_next_id_find(ids);
+	if (entry)
+		hlist_del(&entry->node);
+	spin_unlock(&ipc_next_id_lock);
+	kfree(entry);
+}
+
+int ipc_next_id_take(struct ipc_ids *ids)
+{
+	struct ipc_next_id *entry;
+	int next_id = -1;
+
+	spin_lock(&ipc_next_id_lock);
+	entry = ipc_next_id_find(ids);
+	if (entry) {
+		next_id = entry->next_id;
+		entry->next_id = -1;
+	}
+	spin_unlock(&ipc_next_id_lock);
+	return next_id;
+}
+
+int ipc_next_id_get(struct ipc_ids *ids)
+{
+	struct ipc_next_id *entry;
+	int next_id = -1;
+
+	spin_lock(&ipc_next_id_lock);
+	entry = ipc_next_id_find(ids);
+	if (entry)
+		next_id = entry->next_id;
+	spin_unlock(&ipc_next_id_lock);
+	return next_id;
+}
+
+int ipc_next_id_set(struct ipc_ids *ids, int next_id)
+{
+	struct ipc_next_id *entry;
+	int ret = -ENOMEM;
+
+	spin_lock(&ipc_next_id_lock);
+	entry = ipc_next_id_find(ids);
+	if (entry) {
+		entry->next_id = next_id;
+		ret = 0;
+	}
+	spin_unlock(&ipc_next_id_lock);
+	return ret;
+}
+#endif /* CONFIG_CHECKPOINT_RESTORE */
+
 /**
  * ipc_init_ids	- initialise ipc identifiers
  * @ids: ipc identifier set
@@ -120,9 +226,7 @@ void ipc_init_ids(struct ipc_ids *ids)
 	idr_init(&ids->ipcs_idr);
 	ids->max_idx = -1;
 	ids->last_idx = -1;
-#ifdef CONFIG_CHECKPOINT_RESTORE
-	ids->next_id = -1;
-#endif
+	ipc_next_id_init(ids);
 }
 
 #ifdef CONFIG_PROC_FS
@@ -200,12 +304,9 @@ static struct kern_ipc_perm *ipc_findkey(struct ipc_ids *ids, key_t key)
  */
 static inline int ipc_idr_alloc(struct ipc_ids *ids, struct kern_ipc_perm *new)
 {
-	int idx, next_id = -1;
+	int idx, next_id;
 
-#ifdef CONFIG_CHECKPOINT_RESTORE
-	next_id = ids->next_id;
-	ids->next_id = -1;
-#endif
+	next_id = ipc_next_id_take(ids);
 
 	/*
 	 * As soon as a new object is inserted into the idr,

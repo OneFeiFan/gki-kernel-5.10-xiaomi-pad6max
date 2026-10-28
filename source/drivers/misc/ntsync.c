@@ -11,6 +11,7 @@
 #include <linux/fs.h>
 #include <linux/hrtimer.h>
 #include <linux/ktime.h>
+#include <linux/time_namespace.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -859,8 +860,11 @@ static int ntsync_schedule(const struct ntsync_q *q, const struct ntsync_wait_ar
 
 	timeout_ptr = (args->timeout == U64_MAX ? NULL : &timeout);
 
-	if (args->flags & NTSYNC_WAIT_REALTIME)
+	if (args->flags & NTSYNC_WAIT_REALTIME) {
 		clock = CLOCK_REALTIME;
+	} else if (args->timeout != U64_MAX) {
+		timeout = timens_ktime_to_host(clock, timeout);
+	}
 
 	do {
 		if (signal_pending(current)) {
@@ -895,6 +899,9 @@ static int setup_wait(struct ntsync_device *dev,
 	__u32 i, j;
 
 	if (args->pad || (args->flags & ~NTSYNC_WAIT_REALTIME))
+		return -EINVAL;
+
+	if (!args->owner)
 		return -EINVAL;
 
 	if (size >= sizeof(fds))

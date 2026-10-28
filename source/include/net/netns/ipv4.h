@@ -11,6 +11,8 @@
 #include <linux/rcupdate.h>
 #include <linux/siphash.h>
 #include <linux/android_kabi.h>
+#include <linux/build_bug.h>
+#include <linux/stddef.h>
 
 struct tcpm_hash_bucket;
 struct ctl_table_header;
@@ -231,4 +233,14 @@ struct netns_ipv4 {
 
 	ANDROID_KABI_RESERVE(1);
 };
+
+/*
+ * KMI pins: the l3mdev sysctls added under CONFIG_NET_L3_MASTER_DEV live
+ * in the alignment hole before tcp_death_row, so the stock offsets are
+ * preserved. Keep it that way.
+ */
+#ifndef __GENKSYMS__
+static_assert(offsetof(struct netns_ipv4, tcp_death_row) == 640);
+static_assert(sizeof(struct netns_ipv4) == 960);
+#endif
 #endif

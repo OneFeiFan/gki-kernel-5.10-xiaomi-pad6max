@@ -10,6 +10,8 @@
 #include <linux/ns_common.h>
 #include <linux/refcount.h>
 #include <linux/rhashtable-types.h>
+#include <linux/build_bug.h>
+#include <linux/stddef.h>
 
 struct user_namespace;
 
@@ -20,11 +22,19 @@ struct ipc_ids {
 	struct idr ipcs_idr;
 	int max_idx;
 	int last_idx;	/* For wrap around detection */
-#if defined(CONFIG_CHECKPOINT_RESTORE) && !defined(__GENKSYMS__)
-	int next_id;
-#endif
 	struct rhashtable key_ht;
 };
+
+/*
+ * KMI pins for the AOSP GKI layout (reference kernel has
+ * CONFIG_CHECKPOINT_RESTORE disabled). The checkpoint/restore next_id
+ * field is kept out of line in ipc/util.c so enabling that option does
+ * not move key_ht or grow the struct.
+ */
+#ifndef __GENKSYMS__
+static_assert(offsetof(struct ipc_ids, key_ht) == 104);
+static_assert(sizeof(struct ipc_ids) == 272);
+#endif
 
 struct ipc_namespace {
 	refcount_t	count;

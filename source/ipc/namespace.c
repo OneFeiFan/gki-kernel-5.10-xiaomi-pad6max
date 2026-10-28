@@ -113,6 +113,8 @@ void free_ipcs(struct ipc_namespace *ns, struct ipc_ids *ids,
 		total++;
 	}
 	up_write(&ids->rwsem);
+
+	ipc_next_id_free(ids);
 }
 
 static void free_ipc_ns(struct ipc_namespace *ns)

@@ -35,3 +35,10 @@
 00-platform/0035-restore-stock-runtime-defaults.patch
 09-docs/0036-docs-32bit-futex-defaults.patch
 09-docs/0037-docs-repo-layout-paths.patch
+10-sched/0038-sched-cfs-bandwidth-kabi.patch
+00-platform/0039-module-reject-crc-mismatch.patch
+01-container/0040-ipc-next-id-side-table.patch
+06-network/0041-net-pin-netns-ipv4-layout.patch
+02-wine/0042-ntsync-timens-owner.patch
+00-platform/0043-gki-defconfig-drop-module-sig.patch
+09-docs/0044-docs-cfs-p0-p1p2-gates.patch

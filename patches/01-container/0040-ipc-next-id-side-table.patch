@@ -1,0 +1,350 @@
+From 741ae7d940450979da4e0d65a8a2ff6e71e520ee Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Wed, 28 Oct 2026 22:41:27 +0800
+Subject: [PATCH] ipc: move next_id out of struct ipc_ids
+
+CONFIG_CHECKPOINT_RESTORE's next_id was hidden from genksyms but still
+moved key_ht from 104 to 112 in the real layout. Store next_id in an
+out-of-line table keyed by the ipc_ids pointer instead; entries are
+created in ipc_init_ids() and released in free_ipcs(). The sysctl keeps
+its per-namespace behaviour through a dedicated handler.
+
+static_assert pins key_ht at 104 and sizeof(struct ipc_ids) at 272.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ include/linux/ipc_namespace.h |  16 ++++-
+ ipc/ipc_sysctl.c              |  54 +++++++++++++---
+ ipc/namespace.c               |   2 +
+ ipc/util.c                    | 117 +++++++++++++++++++++++++++++++---
+ ipc/util.h                    |  18 ++++++
+ 5 files changed, 187 insertions(+), 20 deletions(-)
+
+diff --git a/include/linux/ipc_namespace.h b/include/linux/ipc_namespace.h
+index ed9f5d4a2..73d630dca 100644
+--- a/include/linux/ipc_namespace.h
++++ b/include/linux/ipc_namespace.h
+@@ -10,6 +10,8 @@
+ #include <linux/ns_common.h>
+ #include <linux/refcount.h>
+ #include <linux/rhashtable-types.h>
++#include <linux/build_bug.h>
++#include <linux/stddef.h>
+ 
+ struct user_namespace;
+ 
+@@ -20,12 +22,20 @@ struct ipc_ids {
+ 	struct idr ipcs_idr;
+ 	int max_idx;
+ 	int last_idx;	/* For wrap around detection */
+-#if defined(CONFIG_CHECKPOINT_RESTORE) && !defined(__GENKSYMS__)
+-	int next_id;
+-#endif
+ 	struct rhashtable key_ht;
+ };
+ 
++/*
++ * KMI pins for the AOSP GKI layout (reference kernel has
++ * CONFIG_CHECKPOINT_RESTORE disabled). The checkpoint/restore next_id
++ * field is kept out of line in ipc/util.c so enabling that option does
++ * not move key_ht or grow the struct.
++ */
++#ifndef __GENKSYMS__
++static_assert(offsetof(struct ipc_ids, key_ht) == 104);
++static_assert(sizeof(struct ipc_ids) == 272);
++#endif
++
+ struct ipc_namespace {
+ 	refcount_t	count;
+ 	struct ipc_ids	ids[3];
+diff --git a/ipc/ipc_sysctl.c b/ipc/ipc_sysctl.c
+index 3f312bf2b..eb7703747 100644
+--- a/ipc/ipc_sysctl.c
++++ b/ipc/ipc_sysctl.c
+@@ -22,6 +22,14 @@ static void *get_ipc(struct ctl_table *table)
+ 	return which;
+ }
+ 
++#ifdef CONFIG_CHECKPOINT_RESTORE
++static const int ipc_next_id_type[3] = {
++	[IPC_SEM_IDS] = IPC_SEM_IDS,
++	[IPC_MSG_IDS] = IPC_MSG_IDS,
++	[IPC_SHM_IDS] = IPC_SHM_IDS,
++};
++#endif
++
+ #ifdef CONFIG_PROC_SYSCTL
+ static int proc_ipc_dointvec(struct ctl_table *table, int write,
+ 		void *buffer, size_t *lenp, loff_t *ppos)
+@@ -84,6 +92,33 @@ static int proc_ipc_auto_msgmni(struct ctl_table *table, int write,
+ 	return proc_dointvec_minmax(&ipc_table, write, buffer, lenp, ppos);
+ }
+ 
++#ifdef CONFIG_CHECKPOINT_RESTORE
++static int proc_ipc_next_id(struct ctl_table *table, int write,
++		void *buffer, size_t *lenp, loff_t *ppos)
++{
++	struct ctl_table ipc_table;
++	struct ipc_namespace *ns = current->nsproxy->ipc_ns;
++	int type = *(const int *)table->data;
++	int next_id;
++	int ret;
++
++	if (type < IPC_SEM_IDS || type > IPC_SHM_IDS)
++		return -EINVAL;
++
++	next_id = ipc_next_id_get(&ns->ids[type]);
++
++	memcpy(&ipc_table, table, sizeof(ipc_table));
++	ipc_table.data = &next_id;
++	ipc_table.maxlen = sizeof(next_id);
++
++	ret = proc_dointvec_minmax(&ipc_table, write, buffer, lenp, ppos);
++	if (ret == 0 && write)
++		ret = ipc_next_id_set(&ns->ids[type], next_id);
++
++	return ret;
++}
++#endif /* CONFIG_CHECKPOINT_RESTORE */
++
+ static int proc_ipc_sem_dointvec(struct ctl_table *table, int write,
+ 	void *buffer, size_t *lenp, loff_t *ppos)
+ {
+@@ -111,6 +146,7 @@ static int proc_ipc_sem_dointvec(struct ctl_table *table, int write,
+ #define proc_ipc_dointvec_minmax_orphans   NULL
+ #define proc_ipc_auto_msgmni	   NULL
+ #define proc_ipc_sem_dointvec	   NULL
++#define proc_ipc_next_id	   NULL
+ #endif
+ 
+ int ipc_mni = IPCMNI;
+@@ -196,28 +232,28 @@ static struct ctl_table ipc_kern_table[] = {
+ #ifdef CONFIG_CHECKPOINT_RESTORE
+ 	{
+ 		.procname	= "sem_next_id",
+-		.data		= &init_ipc_ns.ids[IPC_SEM_IDS].next_id,
+-		.maxlen		= sizeof(init_ipc_ns.ids[IPC_SEM_IDS].next_id),
++		.data		= (void *)&ipc_next_id_type[IPC_SEM_IDS],
++		.maxlen		= sizeof(int),
+ 		.mode		= 0644,
+-		.proc_handler	= proc_ipc_dointvec_minmax,
++		.proc_handler	= proc_ipc_next_id,
+ 		.extra1		= SYSCTL_ZERO,
+ 		.extra2		= SYSCTL_INT_MAX,
+ 	},
+ 	{
+ 		.procname	= "msg_next_id",
+-		.data		= &init_ipc_ns.ids[IPC_MSG_IDS].next_id,
+-		.maxlen		= sizeof(init_ipc_ns.ids[IPC_MSG_IDS].next_id),
++		.data		= (void *)&ipc_next_id_type[IPC_MSG_IDS],
++		.maxlen		= sizeof(int),
+ 		.mode		= 0644,
+-		.proc_handler	= proc_ipc_dointvec_minmax,
++		.proc_handler	= proc_ipc_next_id,
+ 		.extra1		= SYSCTL_ZERO,
+ 		.extra2		= SYSCTL_INT_MAX,
+ 	},
+ 	{
+ 		.procname	= "shm_next_id",
+-		.data		= &init_ipc_ns.ids[IPC_SHM_IDS].next_id,
+-		.maxlen		= sizeof(init_ipc_ns.ids[IPC_SHM_IDS].next_id),
++		.data		= (void *)&ipc_next_id_type[IPC_SHM_IDS],
++		.maxlen		= sizeof(int),
+ 		.mode		= 0644,
+-		.proc_handler	= proc_ipc_dointvec_minmax,
++		.proc_handler	= proc_ipc_next_id,
+ 		.extra1		= SYSCTL_ZERO,
+ 		.extra2		= SYSCTL_INT_MAX,
+ 	},
+diff --git a/ipc/namespace.c b/ipc/namespace.c
+index 24e7b4532..02cf861a7 100644
+--- a/ipc/namespace.c
++++ b/ipc/namespace.c
+@@ -113,6 +113,8 @@ void free_ipcs(struct ipc_namespace *ns, struct ipc_ids *ids,
+ 		total++;
+ 	}
+ 	up_write(&ids->rwsem);
++
++	ipc_next_id_free(ids);
+ }
+ 
+ static void free_ipc_ns(struct ipc_namespace *ns)
+diff --git a/ipc/util.c b/ipc/util.c
+index 9fd65095e..73aeb0fcd 100644
+--- a/ipc/util.c
++++ b/ipc/util.c
+@@ -61,6 +61,8 @@
+ #include <linux/audit.h>
+ #include <linux/nsproxy.h>
+ #include <linux/rwsem.h>
++#include <linux/spinlock.h>
++#include <linux/list.h>
+ #include <linux/memory.h>
+ #include <linux/ipc_namespace.h>
+ #include <linux/rhashtable.h>
+@@ -104,6 +106,110 @@ static const struct rhashtable_params ipc_kht_params = {
+ 	.automatic_shrinking	= true,
+ };
+ 
++#ifdef CONFIG_CHECKPOINT_RESTORE
++/*
++ * The checkpoint/restore next_id lives outside struct ipc_ids so that
++ * enabling CONFIG_CHECKPOINT_RESTORE keeps the stock GKI layout (key_ht
++ * at offset 104, sizeof(struct ipc_ids) == 272). The table is keyed by
++ * the ipc_ids pointer; one entry per identifier set (three per ipc
++ * namespace). Entries are created in ipc_init_ids() and removed in
++ * free_ipcs().
++ */
++struct ipc_next_id {
++	struct hlist_node	node;
++	struct ipc_ids		*ids;
++	int			next_id;
++};
++
++static DEFINE_SPINLOCK(ipc_next_id_lock);
++static HLIST_HEAD(ipc_next_id_list);
++
++static struct ipc_next_id *ipc_next_id_find(struct ipc_ids *ids)
++{
++	struct ipc_next_id *entry;
++
++	hlist_for_each_entry(entry, &ipc_next_id_list, node) {
++		if (entry->ids == ids)
++			return entry;
++	}
++	return NULL;
++}
++
++void ipc_next_id_init(struct ipc_ids *ids)
++{
++	struct ipc_next_id *entry = kmalloc(sizeof(*entry), GFP_KERNEL);
++
++	if (!entry)
++		return;
++	entry->ids = ids;
++	entry->next_id = -1;
++
++	spin_lock(&ipc_next_id_lock);
++	if (ipc_next_id_find(ids)) {
++		spin_unlock(&ipc_next_id_lock);
++		kfree(entry);
++		return;
++	}
++	hlist_add_head(&entry->node, &ipc_next_id_list);
++	spin_unlock(&ipc_next_id_lock);
++}
++
++void ipc_next_id_free(struct ipc_ids *ids)
++{
++	struct ipc_next_id *entry;
++
++	spin_lock(&ipc_next_id_lock);
++	entry = ipc_next_id_find(ids);
++	if (entry)
++		hlist_del(&entry->node);
++	spin_unlock(&ipc_next_id_lock);
++	kfree(entry);
++}
++
++int ipc_next_id_take(struct ipc_ids *ids)
++{
++	struct ipc_next_id *entry;
++	int next_id = -1;
++
++	spin_lock(&ipc_next_id_lock);
++	entry = ipc_next_id_find(ids);
++	if (entry) {
++		next_id = entry->next_id;
++		entry->next_id = -1;
++	}
++	spin_unlock(&ipc_next_id_lock);
++	return next_id;
++}
++
++int ipc_next_id_get(struct ipc_ids *ids)
++{
++	struct ipc_next_id *entry;
++	int next_id = -1;
++
++	spin_lock(&ipc_next_id_lock);
++	entry = ipc_next_id_find(ids);
++	if (entry)
++		next_id = entry->next_id;
++	spin_unlock(&ipc_next_id_lock);
++	return next_id;
++}
++
++int ipc_next_id_set(struct ipc_ids *ids, int next_id)
++{
++	struct ipc_next_id *entry;
++	int ret = -ENOMEM;
++
++	spin_lock(&ipc_next_id_lock);
++	entry = ipc_next_id_find(ids);
++	if (entry) {
++		entry->next_id = next_id;
++		ret = 0;
++	}
++	spin_unlock(&ipc_next_id_lock);
++	return ret;
++}
++#endif /* CONFIG_CHECKPOINT_RESTORE */
++
+ /**
+  * ipc_init_ids	- initialise ipc identifiers
+  * @ids: ipc identifier set
+@@ -120,9 +226,7 @@ void ipc_init_ids(struct ipc_ids *ids)
+ 	idr_init(&ids->ipcs_idr);
+ 	ids->max_idx = -1;
+ 	ids->last_idx = -1;
+-#ifdef CONFIG_CHECKPOINT_RESTORE
+-	ids->next_id = -1;
+-#endif
++	ipc_next_id_init(ids);
+ }
+ 
+ #ifdef CONFIG_PROC_FS
+@@ -200,12 +304,9 @@ static struct kern_ipc_perm *ipc_findkey(struct ipc_ids *ids, key_t key)
+  */
+ static inline int ipc_idr_alloc(struct ipc_ids *ids, struct kern_ipc_perm *new)
+ {
+-	int idx, next_id = -1;
++	int idx, next_id;
+ 
+-#ifdef CONFIG_CHECKPOINT_RESTORE
+-	next_id = ids->next_id;
+-	ids->next_id = -1;
+-#endif
++	next_id = ipc_next_id_take(ids);
+ 
+ 	/*
+ 	 * As soon as a new object is inserted into the idr,
+diff --git a/ipc/util.h b/ipc/util.h
+index 5766c61ae..72316a95f 100644
+--- a/ipc/util.h
++++ b/ipc/util.h
+@@ -113,6 +113,24 @@ struct seq_file;
+ struct ipc_ids;
+ 
+ void ipc_init_ids(struct ipc_ids *ids);
++
++/*
++ * CONFIG_CHECKPOINT_RESTORE's next_id is stored out of line, keyed by
++ * the ipc_ids pointer, so struct ipc_ids keeps the stock GKI layout.
++ */
++#ifdef CONFIG_CHECKPOINT_RESTORE
++void ipc_next_id_init(struct ipc_ids *ids);
++void ipc_next_id_free(struct ipc_ids *ids);
++int ipc_next_id_take(struct ipc_ids *ids);
++int ipc_next_id_get(struct ipc_ids *ids);
++int ipc_next_id_set(struct ipc_ids *ids, int next_id);
++#else
++static inline void ipc_next_id_init(struct ipc_ids *ids) { }
++static inline void ipc_next_id_free(struct ipc_ids *ids) { }
++static inline int ipc_next_id_take(struct ipc_ids *ids) { return -1; }
++static inline int ipc_next_id_get(struct ipc_ids *ids) { return -1; }
++static inline int ipc_next_id_set(struct ipc_ids *ids, int next_id) { return -ENOMEM; }
++#endif
+ #ifdef CONFIG_PROC_FS
+ void __init ipc_init_proc_interface(const char *path, const char *header,
+ 		int ids, int (*show)(struct seq_file *, void *));

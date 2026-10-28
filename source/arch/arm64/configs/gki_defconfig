@@ -854,8 +854,9 @@ CONFIG_NET_SCH_DEFAULT=y
 CONFIG_NET_SCH_FQ_PIE=y
 
 # Phase 7: block throttle, net classifier, checkpoint, Btrfs.
-# CFS_BANDWIDTH is deferred: enabling it prevents this vendor kernel from
-# reaching adbd (boot bisect 2026-10-25: CFS+BLK fails, BLK alone boots).
+# CFS_BANDWIDTH is enabled with the kABI-safe ext split (cfs_rq_bandwidth /
+# cfs_bandwidth_state); see kernel/sched/sched.h.
+CONFIG_CFS_BANDWIDTH=y
 CONFIG_BLK_DEV_THROTTLING=y
 CONFIG_NET_CLS_CGROUP=y
 CONFIG_CHECKPOINT_RESTORE=y
@@ -868,7 +869,6 @@ CONFIG_NTSYNC=y
 # Phase 10.4: ZRAM LZ4K/LZ4KD with ARM64 NEON.
 CONFIG_ZSMALLOC=y
 CONFIG_ZRAM=y
-CONFIG_MODULE_SIG=n
 CONFIG_CRYPTO_LZO=y
 CONFIG_ZRAM_DEF_COMP_LZ4=y
 CONFIG_CRYPTO_LZ4HC=y

@@ -22,6 +22,14 @@ static void *get_ipc(struct ctl_table *table)
 	return which;
 }
 
+#ifdef CONFIG_CHECKPOINT_RESTORE
+static const int ipc_next_id_type[3] = {
+	[IPC_SEM_IDS] = IPC_SEM_IDS,
+	[IPC_MSG_IDS] = IPC_MSG_IDS,
+	[IPC_SHM_IDS] = IPC_SHM_IDS,
+};
+#endif
+
 #ifdef CONFIG_PROC_SYSCTL
 static int proc_ipc_dointvec(struct ctl_table *table, int write,
 		void *buffer, size_t *lenp, loff_t *ppos)
@@ -84,6 +92,33 @@ static int proc_ipc_auto_msgmni(struct ctl_table *table, int write,
 	return proc_dointvec_minmax(&ipc_table, write, buffer, lenp, ppos);
 }
 
+#ifdef CONFIG_CHECKPOINT_RESTORE
+static int proc_ipc_next_id(struct ctl_table *table, int write,
+		void *buffer, size_t *lenp, loff_t *ppos)
+{
+	struct ctl_table ipc_table;
+	struct ipc_namespace *ns = current->nsproxy->ipc_ns;
+	int type = *(const int *)table->data;
+	int next_id;
+	int ret;
+
+	if (type < IPC_SEM_IDS || type > IPC_SHM_IDS)
+		return -EINVAL;
+
+	next_id = ipc_next_id_get(&ns->ids[type]);
+
+	memcpy(&ipc_table, table, sizeof(ipc_table));
+	ipc_table.data = &next_id;
+	ipc_table.maxlen = sizeof(next_id);
+
+	ret = proc_dointvec_minmax(&ipc_table, write, buffer, lenp, ppos);
+	if (ret == 0 && write)
+		ret = ipc_next_id_set(&ns->ids[type], next_id);
+
+	return ret;
+}
+#endif /* CONFIG_CHECKPOINT_RESTORE */
+
 static int proc_ipc_sem_dointvec(struct ctl_table *table, int write,
 	void *buffer, size_t *lenp, loff_t *ppos)
 {
@@ -111,6 +146,7 @@ static int proc_ipc_sem_dointvec(struct ctl_table *table, int write,
 #define proc_ipc_dointvec_minmax_orphans   NULL
 #define proc_ipc_auto_msgmni	   NULL
 #define proc_ipc_sem_dointvec	   NULL
+#define proc_ipc_next_id	   NULL
 #endif
 
 int ipc_mni = IPCMNI;
@@ -196,28 +232,28 @@ static struct ctl_table ipc_kern_table[] = {
 #ifdef CONFIG_CHECKPOINT_RESTORE
 	{
 		.procname	= "sem_next_id",
-		.data		= &init_ipc_ns.ids[IPC_SEM_IDS].next_id,
-		.maxlen		= sizeof(init_ipc_ns.ids[IPC_SEM_IDS].next_id),
+		.data		= (void *)&ipc_next_id_type[IPC_SEM_IDS],
+		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_ipc_dointvec_minmax,
+		.proc_handler	= proc_ipc_next_id,
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= SYSCTL_INT_MAX,
 	},
 	{
 		.procname	= "msg_next_id",
-		.data		= &init_ipc_ns.ids[IPC_MSG_IDS].next_id,
-		.maxlen		= sizeof(init_ipc_ns.ids[IPC_MSG_IDS].next_id),
+		.data		= (void *)&ipc_next_id_type[IPC_MSG_IDS],
+		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_ipc_dointvec_minmax,
+		.proc_handler	= proc_ipc_next_id,
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= SYSCTL_INT_MAX,
 	},
 	{
 		.procname	= "shm_next_id",
-		.data		= &init_ipc_ns.ids[IPC_SHM_IDS].next_id,
-		.maxlen		= sizeof(init_ipc_ns.ids[IPC_SHM_IDS].next_id),
+		.data		= (void *)&ipc_next_id_type[IPC_SHM_IDS],
+		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_ipc_dointvec_minmax,
+		.proc_handler	= proc_ipc_next_id,
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= SYSCTL_INT_MAX,
 	},

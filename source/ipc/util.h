@@ -113,6 +113,24 @@ struct seq_file;
 struct ipc_ids;
 
 void ipc_init_ids(struct ipc_ids *ids);
+
+/*
+ * CONFIG_CHECKPOINT_RESTORE's next_id is stored out of line, keyed by
+ * the ipc_ids pointer, so struct ipc_ids keeps the stock GKI layout.
+ */
+#ifdef CONFIG_CHECKPOINT_RESTORE
+void ipc_next_id_init(struct ipc_ids *ids);
+void ipc_next_id_free(struct ipc_ids *ids);
+int ipc_next_id_take(struct ipc_ids *ids);
+int ipc_next_id_get(struct ipc_ids *ids);
+int ipc_next_id_set(struct ipc_ids *ids, int next_id);
+#else
+static inline void ipc_next_id_init(struct ipc_ids *ids) { }
+static inline void ipc_next_id_free(struct ipc_ids *ids) { }
+static inline int ipc_next_id_take(struct ipc_ids *ids) { return -1; }
+static inline int ipc_next_id_get(struct ipc_ids *ids) { return -1; }
+static inline int ipc_next_id_set(struct ipc_ids *ids, int next_id) { return -ENOMEM; }
+#endif
 #ifdef CONFIG_PROC_FS
 void __init ipc_init_proc_interface(const char *path, const char *header,
 		int ids, int (*show)(struct seq_file *, void *));
