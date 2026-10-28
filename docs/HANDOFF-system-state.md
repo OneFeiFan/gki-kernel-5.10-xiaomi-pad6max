@@ -1,6 +1,6 @@
 # 系统状态交接（yudi / Xiaomi Pad 6 Max）
 
-日期：2026-10-27
+日期：2026-10-28
 用途：给后续驱动优化（先看 GPU）留一份可复现的现状记录。内核补丁本身见
 `~/kernel-sources/vanilla-root/common/README.gki-docker.md` 和 `patches/`。
 
@@ -17,7 +17,7 @@
 | 内存 | 15881904 kB（约 15.9GB），当前 MemFree 约 6.9GB，MemAvailable 约 10.9GB |
 | CPU | 8 核，小核最高 2.016GHz，中核 2.7456GHz，大核 3.1872GHz，governor `walt` |
 | 启动槽 | `_a`，bootloader 已解锁（verified boot orange），SELinux `Enforcing` |
-| 当前内核 | `5.10.272-android12-9-geba364b9a173-dirty` |
+| 当前内核 | `5.10.272-android12-9-gd2cb81ef9dcf-dirty` |
 
 两个容易踩的点：
 
@@ -33,14 +33,14 @@
 | 项目 | 位置 / 值 |
 |---|---|
 | 源码 | `~/kernel-sources/vanilla-root/common` |
-| 分支 | `gki-docker-phase2` |
-| 当前 HEAD | `c87cf87d8`（docs/patches；内核代码对应 `78b90ee4a`） |
+| 分支 | `cfs-bandwidth` |
+| 当前 HEAD | `08dc84ca7`（docs/patches；内核代码对应 `725a4e8ab`） |
 | 构建输出 | `~/kernel-sources/out-zram` |
-| 当前镜像 | `C:\Users\OneFeiFan\boot_272_epoll.img` |
-| 回退镜像 | `C:\Users\OneFeiFan\boot_backup_pre_epoll.img` |
+| 当前镜像 | `C:\Users\OneFeiFan\boot_272_p1p2.img` |
+| 回退镜像 | `C:\Users\OneFeiFan\boot_272_p0.img`、`C:\Users\OneFeiFan\boot_272_simple.img`、`C:\Users\OneFeiFan\boot_backup_pre_simple.img` |
 | 已知可开机备份 | `boot_272_bbr3d.img`、`boot_272_futex.img` 等 |
-| GitHub | `https://github.com/OneFeiFan/gki-kernel-5.10-xiaomi-pad6max`，快照 `c314cfc64` |
-| 补丁 | `common/patches/`，33 个，按 `patches/series` 顺序应用 |
+| GitHub | `https://github.com/OneFeiFan/gki-kernel-5.10-xiaomi-pad6max`，pad6max 分支（本文件随快照更新） |
+| 补丁 | `common/patches/`，45 个，按 `patches/series` 顺序应用 |
 | 补丁基线 | `a1eed2e9c`（5.10.272 merge） |
 
 构建：
@@ -60,15 +60,21 @@ python3 tools/symvers_diff.py \
   out-final/dist/vmlinux.symvers out-zram/dist/vmlinux.symvers
 python3 tools/crc_scan.py \
   out-zram/dist/vmlinux.symvers work/vendor_boot/root
+python3 tools/crc_scan.py \
+  out-zram/dist/vmlinux.symvers work/vendor_dlkm/modules
+python3 tools/check_config.py out-zram/common/.config
+python3 tools/abi_layout_check.py out-zram/dist/vmlinux
 ```
 
-期望：7298 个导出符号缺失 0、CRC 差异 0；355 个 vendor_boot 模块 0 失败。
+期望：7298 个导出符号缺失 0、CRC 差异 0；355 个 vendor_boot 和 315 个
+vendor_dlkm 模块 0 失败；41 项 CONFIG 满足；结构体布局与 AOSP 5.10.272
+基线一致（`cfs_rq.android_vendor_data1` 352 是已记录的 CFS 差异）。
 
 刷机：
 
 ```sh
 adb reboot bootloader
-fastboot flash boot_a boot_272_epoll.img
+fastboot flash boot_a boot_272_p1p2.img
 fastboot reboot
 ```
 
@@ -87,7 +93,7 @@ fastboot reboot
 
 - 模块目录：`/vendor_dlkm/lib/modules`（`/vendor/lib/modules` 是它的软链）。
 - 设备上有 315 个 `.ko`；本地基线 `~/kernel-sources/work/vendor_boot/root` 里有 355 个。
-- 当前加载模块数：421（`/proc/modules`；`lsmod` 会多一行表头）。
+- 当前加载模块数：420（`/proc/modules`；`lsmod` 会多一行表头）。
 - GPU 相关：
   - `msm_kgsl.ko`：1,851,392 字节，vermagic `5.10.160-gki-gd28eeb36ae86`
   - `msm_drm.ko`：显示/DRM
@@ -155,7 +161,7 @@ fastboot reboot
 ## 5. 状态采集
 
 脚本：`~/kernel-sources/tools/collect_system_state.sh`
-原始快照：`~/kernel-sources/work/state-2026-10-27.txt`
+原始快照：`~/kernel-sources/work/state-2026-10-28.txt`
 
 采集：
 
@@ -170,7 +176,8 @@ adb pull /data/local/tmp/state.txt
 
 ## 6. 做驱动优化前的约束
 
-1. **KMI 不能破。** 每次内核改动跑 7298 符号和 355 模块门禁；vendor 模块按
+1. **KMI 不能破。** 每次内核改动跑 7298 符号、355 vendor_boot + 315 vendor_dlkm
+   模块门禁；vendor 模块按
    `5.10.160-gki` 编译，CRC 对不上就加载失败。
 2. **GPU 驱动不在 GKI 里。** 改 KGSL 需要 vendor 源码或重打包 vendor 分区；
    改 GKI 只能影响调度、内存、热和 IRQ。
@@ -209,7 +216,7 @@ adb pull /data/local/tmp/state.txt
 - 内核源码：`~/kernel-sources/vanilla-root/common`
 - 构建输出：`~/kernel-sources/out-zram`
 - vendor 模块基线：`~/kernel-sources/work/vendor_boot/root`
-- 原始状态快照：`~/kernel-sources/work/state-2026-10-27.txt`
+- 原始状态快照：`~/kernel-sources/work/state-2026-10-28.txt`
 - 采集脚本：`~/kernel-sources/tools/collect_system_state.sh`
 - KernelSU 模块项目：`~/yudi-ksu-modules`
-- PC 镜像：`C:\Users\OneFeiFan\boot_272_epoll.img`、`C:\Users\OneFeiFan\boot_backup_pre_epoll.img`
+- PC 镜像：`C:\Users\OneFeiFan\boot_272_p1p2.img`、`C:\Users\OneFeiFan\boot_272_p0.img`、`C:\Users\OneFeiFan\boot_272_simple.img`、`C:\Users\OneFeiFan\boot_backup_pre_simple.img`

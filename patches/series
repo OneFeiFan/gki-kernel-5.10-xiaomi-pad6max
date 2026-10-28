@@ -42,3 +42,4 @@
 02-wine/0042-ntsync-timens-owner.patch
 00-platform/0043-gki-defconfig-drop-module-sig.patch
 09-docs/0044-docs-cfs-p0-p1p2-gates.patch
+09-docs/0045-docs-verified-image-p0p1p2.patch

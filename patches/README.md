@@ -7,7 +7,7 @@
 - AOSP `android12-5.10-lts`，5.10.272 合并提交：`a1eed2e9c`
   （`Merge 5.10.272 into android12-5.10-lts`）
 - 应用本目录的 `series` 后，应得到当前仓库的内核源码树；
-  实测 tree 哈希为 `ab671f084a6c5fc582669064062a493e7d7461a9`
+  实测 tree 哈希为 `cdc3d43eca25617d148f5a030b4b8006a8bce426`
   （不含 `patches/` 目录本身）。
 
 ## 应用方法
@@ -94,12 +94,13 @@ while read p; do git apply "$PATCHES/$p"; done < "$PATCHES/series"
 | `02-wine/0042-ntsync-timens-owner.patch` | `8d24e9bfa` | ntsync: honor time namespaces and require an owner |
 | `00-platform/0043-gki-defconfig-drop-module-sig.patch` | `8224e8c44` | gki_defconfig: drop the redundant MODULE_SIG=n line |
 | `09-docs/0044-docs-cfs-p0-p1p2-gates.patch` | `a11d79383` | docs: document the CFS/P0/P1/P2 gates and layout pins |
+| `09-docs/0045-docs-verified-image-p0p1p2.patch` | `725a4e8ab748d11b0185a513d6a0e7c23a3c3681` | docs: update the verified image and P0/P1/P2 state |
 
 ## 验证
 
 - 每个补丁保留原提交的作者和提交信息，`git am` 会重建对应提交。
-- 应用完 `series` 后，内核源码树（不含 `patches/` 目录）应与提交 `a11d79383`
-  的 tree 一致：`ab671f084a6c5fc582669064062a493e7d7461a9`
-  （实测在 `a1eed2e9c` 上按 `series` 顺序 `git am` 44 个补丁，得到同一 tree；
+- 应用完 `series` 后，内核源码树（不含 `patches/` 目录）应与提交 `725a4e8ab748d11b0185a513d6a0e7c23a3c3681`
+  的 tree 一致：`cdc3d43eca25617d148f5a030b4b8006a8bce426`
+  （实测在 `a1eed2e9c` 上按 `series` 顺序 `git am` 45 个补丁，得到同一 tree；
   `09-docs` 只改 README；`patches/` 目录本身不在补丁里）。
 - 本项目的硬门禁：7298 个基线导出符号 CRC 差异为 0；355 个 vendor_boot 和 315 个 vendor_dlkm 模块 0 失败。详见 `README.gki-docker.md`。
