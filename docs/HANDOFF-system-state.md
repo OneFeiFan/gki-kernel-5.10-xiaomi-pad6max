@@ -1,6 +1,6 @@
 # 系统状态交接（yudi / Xiaomi Pad 6 Max）
 
-日期：2026-10-28
+日期：2026-10-29
 用途：给后续驱动优化（先看 GPU）留一份可复现的现状记录。内核补丁本身见
 `~/kernel-sources/vanilla-root/common/README.gki-docker.md` 和 `patches/`。
 
@@ -17,7 +17,7 @@
 | 内存 | 15881904 kB（约 15.9GB），当前 MemFree 约 6.9GB，MemAvailable 约 10.9GB |
 | CPU | 8 核，小核最高 2.016GHz，中核 2.7456GHz，大核 3.1872GHz，governor `walt` |
 | 启动槽 | `_a`，bootloader 已解锁（verified boot orange），SELinux `Enforcing` |
-| 当前内核 | `5.10.272-android12-9-gd2cb81ef9dcf-dirty` |
+| 当前内核 | `5.10.272-android12-9-g8590ea2ff18c` |
 
 两个容易踩的点：
 
@@ -34,13 +34,13 @@
 |---|---|
 | 源码 | `~/kernel-sources/vanilla-root/common` |
 | 分支 | `cfs-bandwidth` |
-| 当前 HEAD | `08dc84ca7`（docs/patches；内核代码对应 `725a4e8ab`） |
+| 当前 HEAD | `d78a2ae2a`（docs/patches；内核代码对应 `8590ea2ff`，文档对应 `9b90ab187`） |
 | 构建输出 | `~/kernel-sources/out-zram` |
-| 当前镜像 | `C:\Users\OneFeiFan\boot_272_p1p2.img` |
-| 回退镜像 | `C:\Users\OneFeiFan\boot_272_p0.img`、`C:\Users\OneFeiFan\boot_272_simple.img`、`C:\Users\OneFeiFan\boot_backup_pre_simple.img` |
+| 当前镜像 | `C:\Users\OneFeiFan\boot_272_p1p3.img` |
+| 回退镜像 | `C:\Users\OneFeiFan\boot_272_p1p2.img`、`C:\Users\OneFeiFan\boot_272_p0.img`、`C:\Users\OneFeiFan\boot_272_simple.img`、`C:\Users\OneFeiFan\boot_backup_pre_simple.img` |
 | 已知可开机备份 | `boot_272_bbr3d.img`、`boot_272_futex.img` 等 |
 | GitHub | `https://github.com/OneFeiFan/gki-kernel-5.10-xiaomi-pad6max`，pad6max 分支（本文件随快照更新） |
-| 补丁 | `common/patches/`，45 个，按 `patches/series` 顺序应用 |
+| 补丁 | `common/patches/`，49 个，按 `patches/series` 顺序应用 |
 | 补丁基线 | `a1eed2e9c`（5.10.272 merge） |
 
 构建：
@@ -68,13 +68,13 @@ python3 tools/abi_layout_check.py out-zram/dist/vmlinux
 
 期望：7298 个导出符号缺失 0、CRC 差异 0；355 个 vendor_boot 和 315 个
 vendor_dlkm 模块 0 失败；41 项 CONFIG 满足；结构体布局与 AOSP 5.10.272
-基线一致（`cfs_rq.android_vendor_data1` 352 是已记录的 CFS 差异）。
+基线一致（`cfs_rq.android_vendor_data1` 保持 344，CFS 指针在 472 尾部填充）。
 
 刷机：
 
 ```sh
 adb reboot bootloader
-fastboot flash boot_a boot_272_p1p2.img
+fastboot flash boot_a boot_272_p1p3.img
 fastboot reboot
 ```
 
@@ -161,7 +161,7 @@ fastboot reboot
 ## 5. 状态采集
 
 脚本：`~/kernel-sources/tools/collect_system_state.sh`
-原始快照：`~/kernel-sources/work/state-2026-10-28.txt`
+原始快照：`~/kernel-sources/work/state-2026-10-29.txt`
 
 采集：
 
@@ -216,7 +216,7 @@ adb pull /data/local/tmp/state.txt
 - 内核源码：`~/kernel-sources/vanilla-root/common`
 - 构建输出：`~/kernel-sources/out-zram`
 - vendor 模块基线：`~/kernel-sources/work/vendor_boot/root`
-- 原始状态快照：`~/kernel-sources/work/state-2026-10-28.txt`
+- 原始状态快照：`~/kernel-sources/work/state-2026-10-29.txt`
 - 采集脚本：`~/kernel-sources/tools/collect_system_state.sh`
 - KernelSU 模块项目：`~/yudi-ksu-modules`
-- PC 镜像：`C:\Users\OneFeiFan\boot_272_p1p2.img`、`C:\Users\OneFeiFan\boot_272_p0.img`、`C:\Users\OneFeiFan\boot_272_simple.img`、`C:\Users\OneFeiFan\boot_backup_pre_simple.img`
+- PC 镜像：`C:\Users\OneFeiFan\boot_272_p1p3.img`、`C:\Users\OneFeiFan\boot_272_p1p2.img`、`C:\Users\OneFeiFan\boot_272_p0.img`、`C:\Users\OneFeiFan\boot_272_simple.img`、`C:\Users\OneFeiFan\boot_backup_pre_simple.img`

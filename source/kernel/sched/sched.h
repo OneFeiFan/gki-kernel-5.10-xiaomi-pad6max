@@ -638,26 +638,27 @@ struct cfs_rq {
 	struct list_head	leaf_cfs_rq_list;
 	struct task_group	*tg;	/* group that "owns" this runqueue */
 
+	ANDROID_VENDOR_DATA_ARRAY(1, 16);
+
 #if defined(CONFIG_CFS_BANDWIDTH) && !defined(__GENKSYMS__)
+	/*
+	 * Lives in the tail padding after the vendor array so that
+	 * android_vendor_data1 stays at its stock offset (344): vendor
+	 * modules address it with compiled-in offsets that genksyms
+	 * cannot see.
+	 */
 	struct cfs_rq_bandwidth *cfs_bandwidth;
 #endif /* CONFIG_CFS_BANDWIDTH */
-
-	ANDROID_VENDOR_DATA_ARRAY(1, 16);
 #endif /* CONFIG_FAIR_GROUP_SCHED */
 };
 
-#if defined(CONFIG_CFS_BANDWIDTH) && defined(CONFIG_FAIR_GROUP_SCHED) && \
-	!defined(__GENKSYMS__)
-/*
- * KMI note: the stock cfs_rq keeps ANDROID_VENDOR_DATA_ARRAY(1, 16) at
- * offset 344. The CFS bandwidth state pointer is deliberately placed
- * before it, shifting the vendor array to 352; the pointer itself is
- * hidden from genksyms. Pin the layout so future edits cannot move it
- * silently.
- */
-static_assert(offsetof(struct cfs_rq, cfs_bandwidth) == 344);
-static_assert(offsetof(struct cfs_rq, android_vendor_data1) == 352);
+#if defined(CONFIG_FAIR_GROUP_SCHED) && !defined(__GENKSYMS__)
+/* KMI: the stock cfs_rq layout seen by vendor modules must not move. */
+static_assert(offsetof(struct cfs_rq, android_vendor_data1) == 344);
 static_assert(sizeof(struct cfs_rq) == 512);
+#ifdef CONFIG_CFS_BANDWIDTH
+static_assert(offsetof(struct cfs_rq, cfs_bandwidth) == 472);
+#endif
 #endif
 
 static inline int rt_bandwidth_enabled(void)

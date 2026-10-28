@@ -1,0 +1,29 @@
+From 92f390aef27f66f18276cb4a82d53c988b559a82 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 28 Oct 2026 15:52:26 +0000
+Subject: [PATCH] tcp_bbr3: tolerate a missing private state in cwnd_event
+
+bbr3_init() allocates the per-socket state with GFP_ATOMIC and leaves
+the slot NULL when the allocation fails. Every other entry point checks
+for that, but bbr3_cwnd_event() dereferences the pointer directly, so a
+CA_EVENT_TX_START after an idle period oopses, and GKI panics on oops.
+Return early like the other callbacks.
+---
+ net/ipv4/tcp_bbr3.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/net/ipv4/tcp_bbr3.c b/net/ipv4/tcp_bbr3.c
+index b3868c541..828039719 100644
+--- a/net/ipv4/tcp_bbr3.c
++++ b/net/ipv4/tcp_bbr3.c
+@@ -471,6 +471,10 @@ static void bbr3_cwnd_event(struct sock *sk, enum tcp_ca_event event)
+ 	struct tcp_sock *tp = tcp_sk(sk);
+ 	struct bbr3 *bbr = bbr3_get_priv(sk);
+ 
++	/* bbr3_init() allocates with GFP_ATOMIC and may fail. */
++	if (!bbr || !bbr->initialized)
++		return;
++
+ 	if (event == CA_EVENT_TX_START) {
+ 		if (!tp->app_limited)
+ 			return;

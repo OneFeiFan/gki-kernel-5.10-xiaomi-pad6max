@@ -43,3 +43,7 @@
 00-platform/0043-gki-defconfig-drop-module-sig.patch
 09-docs/0044-docs-cfs-p0-p1p2-gates.patch
 09-docs/0045-docs-verified-image-p0p1p2.patch
+10-sched/0046-sched-keep-cfs_rq-vendor-data-at-its-stock-offset.patch
+06-network/0047-tcp_bbr3-tolerate-a-missing-private-state-in-cwnd_ev.patch
+02-wine/0048-futex-destroy-the-waitv-timer-when-kcalloc-fails.patch
+09-docs/0049-docs-p1p3-and-container-notes.patch

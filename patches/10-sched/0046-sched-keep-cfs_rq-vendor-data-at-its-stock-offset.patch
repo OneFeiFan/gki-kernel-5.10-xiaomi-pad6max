@@ -1,0 +1,64 @@
+From 256d5277acb62d88e777d03b1d7bd1ffe7d06670 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 28 Oct 2026 15:52:26 +0000
+Subject: [PATCH] sched: keep cfs_rq vendor data at its stock offset
+
+0038 placed the CFS bandwidth state pointer in front of
+ANDROID_VENDOR_DATA_ARRAY(1, 16), which moved android_vendor_data1 from
+offset 344 to 352. The move is hidden from genksyms, so all CRCs stay
+the same while any vendor module that uses cfs_rq->android_vendor_data1
+reads and writes 8 bytes off, and its slot 0 aliases the new pointer.
+
+struct cfs_rq is 64-byte aligned and the stock vendor array ends at
+472, so the pointer fits in the existing tail padding. Move it there and
+pin the stock layout: vendor data at 344, size 512, pointer at 472.
+The layout gate no longer needs an exception for cfs_rq.
+---
+ kernel/sched/sched.h | 27 ++++++++++++++-------------
+ 1 file changed, 14 insertions(+), 13 deletions(-)
+
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 8c7550885..5c53785f3 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -638,26 +638,27 @@ struct cfs_rq {
+ 	struct list_head	leaf_cfs_rq_list;
+ 	struct task_group	*tg;	/* group that "owns" this runqueue */
+ 
++	ANDROID_VENDOR_DATA_ARRAY(1, 16);
++
+ #if defined(CONFIG_CFS_BANDWIDTH) && !defined(__GENKSYMS__)
++	/*
++	 * Lives in the tail padding after the vendor array so that
++	 * android_vendor_data1 stays at its stock offset (344): vendor
++	 * modules address it with compiled-in offsets that genksyms
++	 * cannot see.
++	 */
+ 	struct cfs_rq_bandwidth *cfs_bandwidth;
+ #endif /* CONFIG_CFS_BANDWIDTH */
+-
+-	ANDROID_VENDOR_DATA_ARRAY(1, 16);
+ #endif /* CONFIG_FAIR_GROUP_SCHED */
+ };
+ 
+-#if defined(CONFIG_CFS_BANDWIDTH) && defined(CONFIG_FAIR_GROUP_SCHED) && \
+-	!defined(__GENKSYMS__)
+-/*
+- * KMI note: the stock cfs_rq keeps ANDROID_VENDOR_DATA_ARRAY(1, 16) at
+- * offset 344. The CFS bandwidth state pointer is deliberately placed
+- * before it, shifting the vendor array to 352; the pointer itself is
+- * hidden from genksyms. Pin the layout so future edits cannot move it
+- * silently.
+- */
+-static_assert(offsetof(struct cfs_rq, cfs_bandwidth) == 344);
+-static_assert(offsetof(struct cfs_rq, android_vendor_data1) == 352);
++#if defined(CONFIG_FAIR_GROUP_SCHED) && !defined(__GENKSYMS__)
++/* KMI: the stock cfs_rq layout seen by vendor modules must not move. */
++static_assert(offsetof(struct cfs_rq, android_vendor_data1) == 344);
+ static_assert(sizeof(struct cfs_rq) == 512);
++#ifdef CONFIG_CFS_BANDWIDTH
++static_assert(offsetof(struct cfs_rq, cfs_bandwidth) == 472);
++#endif
+ #endif
+ 
+ static inline int rt_bandwidth_enabled(void)

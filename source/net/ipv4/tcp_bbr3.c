@@ -471,6 +471,10 @@ static void bbr3_cwnd_event(struct sock *sk, enum tcp_ca_event event)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct bbr3 *bbr = bbr3_get_priv(sk);
 
+	/* bbr3_init() allocates with GFP_ATOMIC and may fail. */
+	if (!bbr || !bbr->initialized)
+		return;
+
 	if (event == CA_EVENT_TX_START) {
 		if (!tp->app_limited)
 			return;
