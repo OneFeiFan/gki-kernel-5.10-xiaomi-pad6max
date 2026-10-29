@@ -13,6 +13,7 @@
 
 ```sh
 OUT=~/kernel-sources/out
+BASE=~/kernel-sources/out-base
 python3 symvers_diff.py "$BASE/common/vmlinux.symvers" "$OUT/common/vmlinux.symvers"
 python3 crc_scan.py "$OUT/common/vmlinux.symvers" vendor_boot_modules vendor_dlkm_modules
 python3 check_config.py "$OUT/common/.config"
