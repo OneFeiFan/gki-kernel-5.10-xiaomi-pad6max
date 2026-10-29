@@ -32,9 +32,9 @@
 |---|---|
 | 源码 | `~/kernel-sources/vanilla-root/common` |
 | 分支 | `p0-series`（旧 `cfs-bandwidth` 保留） |
-| HEAD | `884a2d91d`（24 个功能补丁） |
+| HEAD | `48212e16b`（25 个功能补丁） |
 | 构建输出 | `~/kernel-sources/out-zram` |
-| 补丁 | 24 个，基线 `a1eed2e9c`，源码树 `b979f12d` |
+| 补丁 | 25 个，基线 `a1eed2e9c`，源码树 `d88719b5` |
 | 灰度 | `WQ_POWER_EFFICIENT_DEFAULT=y`；zram writeback（ExtM A 探针） |
 | GitHub | `OneFeiFan/gki-kernel-5.10-xiaomi-pad6max`，`pad6max` 快照分支 |
 

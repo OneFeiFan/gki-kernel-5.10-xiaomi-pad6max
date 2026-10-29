@@ -104,6 +104,16 @@ futex/epoll 来自内核 selftests，交叉编译成 arm64 后推到设备上。
   `pkg install iproute2` 后跑 `ss -tin`，能看到
   `bbr:(bw:...,mrtt:...,pacing_gain:...,cwnd_gain:...)`。
 
+## zstd 1.5.7
+
+`lib/zstd` 升级到 1.5.7（来源 ztc1997 的 android12-5.10 树），目录改为
+`common/`、`compress/`、`decompress/`，调用者（crypto、f2fs、btrfs、
+squashfs、incfs、pstore、unzstd）切到小写 `zstd_*` API。
+
+- 设备实测：zram 切到 `zstd` 后 32MB 随机数据写入/读回 md5 一致
+- `vmlinux.symvers` 仍是 7298 个符号、CRC 差异 0；zstd 符号不在 KMI 白名单，未导出
+- 5.10 的 EROFS 不支持 zstd，收益只体现在 zram、f2fs、btrfs 和 initramfs 解压
+
 ## 灰度与探针
 
 - `CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y`（0023）：默认启用 power-efficient

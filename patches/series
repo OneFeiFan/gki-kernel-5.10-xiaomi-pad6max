@@ -22,3 +22,4 @@
 00-platform/0022-gki-defconfig-config-only-extras.patch
 08-power/0023-wq-power-efficient-default.patch
 05-storage/0024-zram-writeback-extm-probe.patch
+09-lib/0025-zstd-1.5.7.patch
