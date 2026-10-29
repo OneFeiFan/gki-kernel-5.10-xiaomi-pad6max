@@ -11,6 +11,13 @@ commented block instead of in savedefconfig order, so drop
 check_defconfig from POST_DEFCONFIG_CMDS.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: 本地原创（build/ThinLTO 设置）
+Upstream-Status: Not-Applicable
+KABI: none
+Depends-On: none
+Notes: 关闭 build.config.gki 的 check_defconfig，后续补丁按功能追加选项
+Tested-On: yudi 5.10.272, 2026-10-29
 ---
  arch/arm64/configs/gki_defconfig | 2 +-
  build.config.gki                 | 2 +-

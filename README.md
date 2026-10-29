@@ -16,14 +16,18 @@ Wine/Proton。
 内核只负责能力和 stock 默认值。BBRv3、zram 算法、KSM、ADIOS、DAMON 这些运行时
 开关由 KernelSU 模块负责。
 
+当前还带两个灰度项：`WQ_POWER_EFFICIENT_DEFAULT` 和 zram writeback（小米 ExtM
+的 A 探针），见 [docs/kernel.md](docs/kernel.md) 与
+[docs/ExtM-research.md](docs/ExtM-research.md)。
+
 ## 仓库结构
 
 | 目录 | 内容 |
 | --- | --- |
 | `source/` | 内核源码，构建环境里的 `common/` |
-| `patches/` | 相对 5.10.272 的 15 个功能补丁 |
+| `patches/` | 相对 5.10.272 的 19 个功能补丁 |
 | `tools/` | 验证脚本：符号、CRC、配置、结构布局 |
-| `docs/` | 构建与验证、设备状态、模块说明、GPU 交接 |
+| `docs/` | 构建与验证、设备状态、模块说明、GPU/ExtM 研究 |
 
 `source/` 是应用完补丁后的树，不是基线。复现方法见 `patches/README.md`。
 

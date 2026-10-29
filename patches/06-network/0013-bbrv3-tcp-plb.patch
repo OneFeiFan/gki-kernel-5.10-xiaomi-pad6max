@@ -9,6 +9,12 @@ Enable TCP_CONG_ADVANCED with BBR and BBRv3 in gki_defconfig and drop
 BIC, Westwood and HTCP; cubic stays the default.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: WildKernels/kernel_patches common/bbrv3/0001-net-tcp-backport-BBRv3-to-android12-5.10.patch（原作者 fatalcoder524），上游 Google BBRv3
+Upstream-Status: Backport
+KABI: __GENKSYMS__ 守卫（tcp.h rate_sample 等）
+Depends-On: none
+Tested-On: yudi 5.10.272（bbr3、PLB 关闭）, 2026-10-29
 ---
  arch/arm64/configs/gki_defconfig |   12 +
  include/linux/tcp.h              |    6 +

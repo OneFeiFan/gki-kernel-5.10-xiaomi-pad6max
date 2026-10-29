@@ -12,6 +12,12 @@ conditional positions. Enable the nftables, bridge netfilter, IPv6
 NAT, IPVS/SCTP, tunnel, virtual NIC and tc options in gki_defconfig.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: superturtlee/kernel-workshop-docker patch/fulldocker/superkernel.diff（netns/netfilter/SCTP/IPVS 方案，本地取子集并适配 5.10）
+Upstream-Status: Not-Applicable
+KABI: netns_ipv4 ANDROID_KABI_RESERVE(1)；__GENKSYMS__ 守卫
+Depends-On: none
+Tested-On: yudi 5.10.272, 2026-10-29
 ---
  arch/arm64/configs/gki_defconfig            | 143 ++++++++++++++++
  include/linux/netdevice.h                   |  29 +++-

@@ -8,6 +8,12 @@ CONFIG_BLK_DEV_THROTTLING needs a throtl_data pointer in struct request_queue. O
 Enable BLK_DEV_THROTTLING in gki_defconfig.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: 本地整理（来源未记录）
+Upstream-Status: Unknown
+KABI: request_queue ANDROID_KABI_RESERVE(1)；__GENKSYMS__ 守卫
+Depends-On: none
+Tested-On: yudi 5.10.272, 2026-10-29
 ---
  arch/arm64/configs/gki_defconfig |  1 +
  include/linux/blkdev.h           | 19 +++++++++++++++----

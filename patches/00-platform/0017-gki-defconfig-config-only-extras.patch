@@ -7,6 +7,12 @@ KSM, tmpfs xattrs/POSIX ACLs and Btrfs need no code changes and leave
 the KMI as is.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: 本地配置
+Upstream-Status: Not-Applicable
+KABI: none
+Depends-On: none
+Tested-On: yudi 5.10.272, 2026-10-29
 ---
  arch/arm64/configs/gki_defconfig | 5 +++++
  1 file changed, 5 insertions(+)

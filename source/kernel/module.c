@@ -3564,21 +3564,20 @@ static char *custom_module_blacklist[] = {
     "lzo", "lzo_rle",
 #endif
 #if IS_BUILTIN(CONFIG_ZRAM)
-    "zram", "oplus_bsp_hybridswap_zram",
+    "zram",
 #endif
 #if IS_BUILTIN(CONFIG_ZSMALLOC)
-    "zsmalloc", "oplus_bsp_zsmalloc",
+    "zsmalloc",
 #endif
 };
 
-static bool blacklisted(const char *module_name)
+static bool module_blacklisted_by_param(const char *module_name)
 {
 	const char *p;
 	size_t len;
-	int i;
 
 	if (!module_blacklist)
-		goto custom_blacklist;
+		return false;
 
 	for (p = module_blacklist; *p; p += len) {
 		len = strcspn(p, ",");
@@ -3588,7 +3587,13 @@ static bool blacklisted(const char *module_name)
 			len++;
 	}
 	
-custom_blacklist:
+	return false;
+}
+
+static bool builtin_shadowed(const char *module_name)
+{
+	int i;
+
 	for (i = 0; i < ARRAY_SIZE(custom_module_blacklist); i++)
 		if (!strcmp(module_name, custom_module_blacklist[i]))
 			return true;
@@ -4040,9 +4045,13 @@ static int load_module(struct load_info *info, const char __user *uargs,
 	 * Now that we know we have the correct module name, check
 	 * if it's blacklisted.
 	 */
-	if (blacklisted(info->name)) {
-		// err = -EPERM;
+	if (module_blacklisted_by_param(info->name)) {
+		err = -EPERM;
 		pr_err("Module %s is blacklisted\n", info->name);
+		goto free_copy;
+	}
+	if (builtin_shadowed(info->name)) {
+		pr_info("Module %s is built in, skipping\n", info->name);
 		goto free_copy;
 	}
 

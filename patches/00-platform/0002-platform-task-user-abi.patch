@@ -10,6 +10,12 @@ PID_NS, SYSVIPC, POSIX_MQUEUE, IPC_NS and USER_NS, plus DEVTMPFS for
 Droidspaces.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: superturtlee/kernel-workshop-docker patch/fulldocker/superkernel.diff（高版本 KABI 方案，本地适配；sysv_shm 部分为本地补充）
+Upstream-Status: Not-Applicable
+KABI: task_struct ANDROID_KABI_RESERVE(3)(4)(5)；_ANDROID_KABI_REPLACE 使用 RESERVE(7)(8) 承载 sysv_shm
+Depends-On: none
+Tested-On: yudi 5.10.272, 2026-10-29
 ---
  arch/arm64/configs/gki_defconfig | 10 +++++++++-
  include/linux/sched.h            | 10 ++++++++--

@@ -8,6 +8,12 @@ Backport the 6.14 NTSync driver. Convert monotonic timeouts through the time nam
 Enable NTSYNC in gki_defconfig.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: WildKernels/kernel_patches（ntsync_base + ntsync_compat_android12-5.10）
+Upstream-Status: Backport
+KABI: none
+Depends-On: none
+Tested-On: yudi 5.10.272（ntsync 11/11）, 2026-10-29
 ---
  arch/arm64/configs/gki_defconfig |    3 +
  drivers/misc/Kconfig             |   12 +

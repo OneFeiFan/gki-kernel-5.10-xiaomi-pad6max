@@ -10,6 +10,12 @@ Enable CGROUP_DEVICE, CGROUP_PIDS, CGROUP_PERF and CGROUP_NET_CLASSID
 in gki_defconfig together with the code that keeps them KMI-safe.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: superturtlee/kernel-workshop-docker patch/fulldocker/superkernel.diff（cgroup MAIN/EXT 拆分，本地适配到 5.10 cgroup v1）
+Upstream-Status: Not-Applicable
+KABI: __GENKSYMS__ 守卫（cgroup v1 MAIN/EXT 拆分）
+Depends-On: none
+Tested-On: yudi 5.10.272, 2026-10-29
 ---
  arch/arm64/configs/gki_defconfig |   5 +
  include/linux/cgroup-defs.h      | 150 +++++++++++++++++++++++++++++-

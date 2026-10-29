@@ -6,6 +6,12 @@ Subject: [PATCH] mm: add le9uo working-set protection
 Add the le9uo workingset_protection sysctl and the reclaim tweak. The kernel default is 1; the KernelSU module can turn it off at boot.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: Star-ZER0/le9uo_android12-5.10
+Upstream-Status: Backport
+KABI: none
+Depends-On: none
+Tested-On: yudi 5.10.272, 2026-10-29
 ---
  Documentation/admin-guide/sysctl/vm.rst |  72 ++++++++++++
  include/linux/mm.h                      |   8 ++

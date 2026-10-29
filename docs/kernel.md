@@ -104,6 +104,15 @@ futex/epoll 来自内核 selftests，交叉编译成 arm64 后推到设备上。
   `pkg install iproute2` 后跑 `ss -tin`，能看到
   `bbr:(bw:...,mrtt:...,pacing_gain:...,cwnd_gain:...)`。
 
+## 灰度与探针
+
+- `CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y`（0018）：默认启用 power-efficient
+  unbound workqueues。已确认 `/sys/module/workqueue/parameters/power_efficient=Y`；
+  真实功耗 A/B 还没做，去掉补丁即可回退。
+- `CONFIG_ZRAM_WRITEBACK=y`（0019）：小米 ExtM 的 A 探针。打开后 zram 会出现
+  `backing_dev`、`writeback*`、`bd_stat` 等节点；ExtM 是否真正启动取决于
+  PerfInit 的启动门槛，见 [ExtM-research.md](ExtM-research.md)。
+
 ## 已知限制
 
 - `tcp_plb_enabled=0`：PLB 面向数据中心 IPv6 多路径，手机网络没有收益。

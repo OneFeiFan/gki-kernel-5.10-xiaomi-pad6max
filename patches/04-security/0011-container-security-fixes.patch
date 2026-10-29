@@ -6,6 +6,12 @@ Subject: [PATCH] fs, net: backport container-relevant security fixes
 Backport the dcache, overlayfs, cpuset and nfnetlink_log fixes that matter for containers.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: 本地整理（来源未记录）
+Upstream-Status: Unknown
+KABI: none
+Depends-On: none
+Tested-On: yudi 5.10.272, 2026-10-29
 ---
  fs/dcache.c                   |  4 +++-
  fs/overlayfs/file.c           | 20 +++++++++++++++++++-

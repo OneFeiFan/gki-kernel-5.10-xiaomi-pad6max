@@ -12,6 +12,12 @@ needs (UNIX_DIAG, PACKET_DIAG, NETLINK_DIAG) and FHANDLE, which systemd
 needs as a container init.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: 本地整理（来源未记录）
+Upstream-Status: Unknown
+KABI: __GENKSYMS__ 守卫（ipc_ids）
+Depends-On: none
+Tested-On: yudi 5.10.272, 2026-10-29
 ---
  arch/arm64/configs/gki_defconfig |   6 +-
  include/linux/ipc_namespace.h    |  16 ++++-

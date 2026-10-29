@@ -3,21 +3,15 @@ From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] block: add the ADIOS I/O scheduler
 
-Add ADIOS as an available elevator and fix blk-mq to set hctx before elevator limit_depth(). The vendor init keeps BFQ/cpq as the default.
+Add the ADIOS I/O scheduler. The blk-mq ctx/hctx fix it
+depends on is in the previous patch.
 
-Enable MQ_IOSCHED_ADIOS in gki_defconfig; the default elevator is
-unchanged.
-
-Co-Authored-By: Claude Code <noreply@anthropic.com>
+Origin: firelzrd/adios v3.3.0r2
+Upstream-Status: Not-Applicable
+KABI: none
+Depends-On: previous blk-mq patch
+Tested-On: yudi 5.10.272 (ADIOS boot test)
 ---
- arch/arm64/configs/gki_defconfig |    4 +
- block/Kconfig.iosched            |    7 +
- block/Makefile                   |    2 +
- block/adios.c                    | 2069 ++++++++++++++++++++++++++++++
- block/blk-mq.c                   |   11 +-
- 5 files changed, 2087 insertions(+), 6 deletions(-)
- create mode 100644 block/adios.c
-
 diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
 index 9e6e133..99008e4 100644
 --- a/arch/arm64/configs/gki_defconfig
@@ -2137,32 +2131,3 @@ index 0000000..ddd8fa9
 +MODULE_LICENSE("GPL");
 +MODULE_DESCRIPTION(ADIOS_PROGNAME);
 \ No newline at end of file
-diff --git a/block/blk-mq.c b/block/blk-mq.c
-index 96ede8f..75908b9 100644
---- a/block/blk-mq.c
-+++ b/block/blk-mq.c
-@@ -365,6 +365,10 @@ static struct request *__blk_mq_alloc_request(struct blk_mq_alloc_data *data)
- 	if (data->cmd_flags & REQ_NOWAIT)
- 		data->flags |= BLK_MQ_REQ_NOWAIT;
- 
-+retry:
-+	data->ctx = blk_mq_get_ctx(q);
-+	data->hctx = blk_mq_map_queue(q, data->cmd_flags, data->ctx);
-+
- 	if (e) {
- 		/*
- 		 * Flush requests are special and go directly to the
-@@ -375,12 +379,7 @@ static struct request *__blk_mq_alloc_request(struct blk_mq_alloc_data *data)
- 		    e->type->ops.limit_depth &&
- 		    !(data->flags & BLK_MQ_REQ_RESERVED))
- 			e->type->ops.limit_depth(data->cmd_flags, data);
--	}
--
--retry:
--	data->ctx = blk_mq_get_ctx(q);
--	data->hctx = blk_mq_map_queue(q, data->cmd_flags, data->ctx);
--	if (!e)
-+	} else
- 		blk_mq_tag_busy(data->hctx);
- 
- 	/*

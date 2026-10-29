@@ -898,3 +898,9 @@ CONFIG_TCP_CONG_BBR3=y
 # BBRv3 is available, but the kernel keeps the stock default (cubic).
 # The runtime module selects bbr3 when requested.
 CONFIG_MQ_IOSCHED_ADIOS=y
+
+# Phase 10.7: power-efficient unbound workqueues (gray test).
+CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+
+# Phase 10.8: zram writeback for the ExtM probe.
+CONFIG_ZRAM_WRITEBACK=y
