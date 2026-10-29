@@ -22,6 +22,7 @@ Wine/Proton。
 | --- | --- |
 | `source/` | 内核源码，构建环境里的 `common/` |
 | `patches/` | 相对 5.10.272 的 15 个功能补丁 |
+| `tools/` | 验证脚本：符号、CRC、配置、结构布局 |
 | `docs/` | 构建与验证、设备状态、模块说明 |
 
 `source/` 是应用完补丁后的树，不是基线。复现方法见 `patches/README.md`。
@@ -86,6 +87,8 @@ while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series"
 | `ntsync` | 按 `/sys/class/misc/ntsync/dev` 创建 `/dev/ntsync` |
 
 ## 验证
+
+以下为 2026-10-29 实测结果，详细步骤见 [docs/kernel.md](docs/kernel.md)。
 
 - 7298 个导出符号，与 5.10.272 基线 CRC 差异 0
 - 355 个 `vendor_boot` 模块、315 个 `vendor_dlkm` 模块，CRC 不匹配 0

@@ -2,29 +2,28 @@
 
 ## 构建
 
-```sh
-cd ~/kernel-sources/vanilla-root
-SKIP_MRPROPER=1 SKIP_CP_KERNEL_HDR=1 \
-BUILD_CONFIG=common/build.config.gki.aarch64 \
-OUT_DIR=~/kernel-sources/out \
-bash build/build.sh -j12
-```
-
-发布镜像用全量构建（清空 `OUT_DIR`）。增量构建会复用 ThinLTO 缓存，
-`kernel/configs.c` 的 `.incbin` 不在缓存键里，`/proc/config.gz` 可能还是上一次
-的配置数据，看起来像配置没生效。
+构建命令见仓库根目录 [README](../README.md)。发布镜像必须清空 `OUT_DIR` 做
+全量构建：增量构建会复用 ThinLTO 缓存，`kernel/configs.c` 的 `.incbin` 不在
+缓存键里，`/proc/config.gz` 可能还是上一次的配置数据，看起来像配置没生效。
 
 ## 门禁
 
+脚本在 `tools/`，用法见 [tools/README.md](../tools/README.md)：
+
 ```sh
-python3 tools/symvers_diff.py out-final/dist/vmlinux.symvers out/dist/vmlinux.symvers
-python3 tools/crc_scan.py out/dist/vmlinux.symvers work/vendor_boot/root
-python3 tools/crc_scan.py out/dist/vmlinux.symvers work/vendor_dlkm/modules
-python3 tools/check_config.py out/common/.config
-python3 tools/abi_layout_check.py out/dist/vmlinux
+OUT=~/kernel-sources/out
+BASE=~/kernel-sources/out-base
+python3 tools/symvers_diff.py "$BASE/common/vmlinux.symvers" "$OUT/common/vmlinux.symvers"
+python3 tools/crc_scan.py "$OUT/common/vmlinux.symvers" vendor_boot_modules vendor_dlkm_modules
+python3 tools/check_config.py "$OUT/common/.config"
+python3 tools/abi_layout_check.py "$OUT/dist/vmlinux"
 ```
 
-期望结果：
+基线 symvers 需要用同一套 `build/` 环境编译 5.10.272 基线得到；两个模块目录
+从设备的 `vendor_boot` 和 `vendor_dlkm` 取，不随仓库发布；布局检查需要
+`pahole`。
+
+2026-10-29 实测结果：
 
 - 7298 个导出符号，缺失 0，CRC 差异 0
 - vendor_boot 355 个模块、vendor_dlkm 315 个模块，失败 0
@@ -33,13 +32,20 @@ python3 tools/abi_layout_check.py out/dist/vmlinux
 
 ## 镜像
 
-两个镜像用同一份 `Image`：
+两个镜像用同一份 `Image`。ramdisk 来自 Google GKI 认证镜像
+（`android12-5.10-2026-10`），内核是本项目编译的。
 
-- 无 root：把 `Image` 和 Google GKI 认证镜像
-  （`gki-certified-boot-android12-5.10-*.zip` 里的 `boot-5.10.img`）的 ramdisk
-  重新打包。
-- 有 root：从 `ksud boot-patch`（v1）生成的 KernelSU 镜像里取出 ramdisk，再和
-  本项目的 `Image` 重新打包。
+```sh
+curl -LO https://dl.google.com/android/gki/gki-certified-boot-android12-5.10-2026-10_r1.zip
+unzip -o gki-certified-boot-android12-5.10-2026-10_r1.zip boot-5.10.img
+python3 unpack_bootimg.py --boot_img boot-5.10.img --out gki/unpack
+```
+
+`unpack_bootimg.py` 和 `mkbootimg.py` 来自 AOSP `system/tools/mkbootimg`：
+
+```sh
+git clone https://android.googlesource.com/platform/system/tools/mkbootimg
+```
 
 ```sh
 # 无 root
@@ -49,7 +55,7 @@ python3 mkbootimg.py --header_version 4 \
   --os_version 12.0.0 --os_patch_level 2025-09 \
   -o yudi-noroot.img
 
-# 有 root（先取得 KernelSU ramdisk，再换成本项目的 Image）
+# 有 root：先在设备上生成 KernelSU ramdisk，再换成本项目的 Image
 ksud boot-patch -b gki/boot-5.10.img -o /data/local/tmp
 python3 mkbootimg.py --header_version 4 \
   --kernel out/dist/Image \
@@ -57,6 +63,9 @@ python3 mkbootimg.py --header_version 4 \
   --os_version 12.0.0 --os_patch_level 2025-09 \
   -o yudi-ksu.img
 ```
+
+`ksud` 从 KernelSU 的 release 里取，在设备上运行；`ksu/ramdisk` 是从它输出的
+镜像里解出来的 ramdisk。
 
 `--os_version 12.0.0 --os_patch_level 2025-09` 与原厂 `boot.img` 的头部一致。
 Google 的 GKI 认证镜像自带 `2099-12`，不要沿用它。设备上 KeyAttestation 显示的
@@ -69,7 +78,8 @@ boot patch level 由 TEE 维护（2026-02-01），与这个头字段无关；保
 
 ## 行为测试
 
-设备上（root）：
+设备上（root）的测试二进制和整机检查脚本是维护者的本机工具，不随仓库发布。
+2026-10-29 的记录：
 
 ```sh
 sh /data/local/tmp/verify_yudi_kernel.sh
@@ -79,6 +89,9 @@ sh /data/local/tmp/verify_yudi_kernel.sh
 /data/local/tmp/vt_tests/epoll_wakeup_test
 ```
 
+NTSync 测试来自上游 selftests（v6.18 的 `stress_counter` 已改成 `volatile`），
+futex/epoll 来自内核 selftests，交叉编译成 arm64 后推到设备上。
+
 期望：NTSync 11/11，owner 2/2，futex_waitv 7/7，epoll 63/63；zram 各算法
 32MB 往返一致；CFS 20% 配额下 `nr_throttled` 增长。
 
@@ -87,8 +100,8 @@ sh /data/local/tmp/verify_yudi_kernel.sh
 - ipvlan：脚本在同一个 dummy 上先建 macvlan 再建 ipvlan。两者都要在 lower
   设备上注册 RX handler，只能有一个，`ip link add` 会报
   `Device or resource busy`。换一个独立的 dummy 就正常。
-- bbr3 诊断：设备自带的 `ss` 是 iproute2-ss171113，不解析 bbr 信息。用 Termux
-  的 iproute2 7.3.0 跑 `ss -tin`，能看到
+- bbr3 诊断：设备自带的 `ss` 是 iproute2-ss171113，不解析 bbr 信息。Termux 里
+  `pkg install iproute2` 后跑 `ss -tin`，能看到
   `bbr:(bw:...,mrtt:...,pacing_gain:...,cwnd_gain:...)`。
 
 ## 已知限制

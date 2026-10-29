@@ -1,7 +1,8 @@
 # 系统状态交接（yudi）
 
 日期：2026-10-29。给后续驱动工作留的现状记录，内核构建和补丁见
-[`kernel.md`](kernel.md) 与仓库 `patches/`。
+[`kernel.md`](kernel.md) 与仓库 `patches/`。除特别说明外，表中的数值都是
+2026-10-29 的采样值。
 
 ## 设备与系统
 
@@ -10,7 +11,7 @@
 | 机型 | Xiaomi Pad 6 Max，yudi，SM8475 |
 | GPU | Adreno 730 v3 |
 | 系统 | Android 16，HyperOS `V816`，`OS3.0.304.97.WMHCNXM` |
-| 安全补丁 | 2026-02-01 |
+| 安全补丁 | 系统 2026-08-01，vendor 2026-02-01 |
 | 屏幕 | 1800×2880，最高 120Hz，360dpi，`qcom,mdss_dsi_m80_42_02_0a_dsc_video` |
 | 内存 | 约 15.9GB |
 | CPU | 8 核，小核 2.016GHz，中核 2.7456GHz，大核 3.1872GHz，`walt` |
@@ -22,9 +23,8 @@
 - 系统是 Android 16，内核源码来自 `android12-5.10-lts`。设备 vendor 模块按
   `5.10.160-gki` 编译，现在靠 GKI KMI 兼容跑通，不代表可以拿 Android 12 的
   vendor 组件直接替换。
-- boot 镜像的 cmdline 还带着旧指纹 `yudi:12/OS3.0.6.0.VMHCNXM:user`，镜像是从
-  旧系统底包重打包的。做 vendor/驱动层改动前，建议先从当前 boot 分区重新取一份
-  底包。
+- boot 的 ramdisk 来自 Google GKI 认证镜像（`android12-5.10-2026-10`），内核是本
+  项目编译的 5.10.272。做 vendor/驱动层改动前，先从当前系统取一份 boot 底包对照。
 
 ## 内核项目
 
@@ -33,7 +33,7 @@
 | 源码 | `~/kernel-sources/vanilla-root/common` |
 | 分支 | `restructured-20261029`（旧 `cfs-bandwidth` 保留） |
 | HEAD | `2cdee214e`（15 个功能补丁） |
-| 构建输出 | `~/kernel-sources/out` |
+| 构建输出 | `~/kernel-sources/out-zram` |
 | 补丁 | 15 个，基线 `a1eed2e9c`，源码树 `24bbf84f` |
 | GitHub | `OneFeiFan/gki-kernel-5.10-xiaomi-pad6max`，`pad6max` 快照分支 |
 
@@ -55,6 +55,8 @@ vendor 模块提供：
 的 yudi 5.10.160 源码，或者重打包 `vendor_boot`/`vendor_dlkm`。
 
 ## GPU 现状
+
+空闲时采样（2026-10-29），温度随负载变化：
 
 | 项目 | 值 |
 |---|---|
@@ -85,7 +87,8 @@ vendor 模块提供：
 1. 不能破 KMI。每次改动都要跑 7298 个符号、355 个 vendor_boot 和 315 个
    vendor_dlkm 模块的门禁。
 2. GPU 驱动不在 GKI 里，改 KGSL 的路线成本很高。
-3. boot 底包的 cmdline 偏旧，深入 vendor 层前建议重新取底包。
+3. boot 的 ramdisk 用的是 Google GKI 认证镜像，深入 vendor 层前建议取一份当前
+   系统的 boot 底包对照。
 4. SELinux Enforcing，临时调试可以 `setenforce 0`，不要常驻。
 5. 热和功耗优先，直接拉高 GPU 上限可能换来降频和耗电。
 
@@ -94,5 +97,5 @@ vendor 模块提供：
 - 765MHz 上限来自 thermal、perfmgr、DT 还是 `gpulevel`？
 - `persist.sys.force_sw_gles=1` 是调试残留还是实际生效？SurfaceFlinger 当前
   显示 Adreno GLES，倾向于是无效属性。
-- 是否要从当前 Android 16 系统重新提取 boot 底包，替换旧 cmdline/ramdisk？
+- 是否需要从当前 Android 16 系统提取 boot 底包，与 Google GKI ramdisk 做对照？
 - Xiaomi 是否公开 yudi 的 5.10.160 vendor 内核源码？
