@@ -1,0 +1,228 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Thu, 29 Oct 2026 01:52:56 +0800
+Subject: [PATCH] zram: build in LZ4K/LZ4KD with ARM64 NEON
+
+Wire LZ4K/LZ4KD into zram, allow selecting any compressing backend in
+the zram Kconfig, and enable zram, zsmalloc and the algorithms in
+gki_defconfig.
+
+Carry the built-in zram/zsmalloc/lzo module blacklist here (as in the
+original combined patch): a module named on the module_blacklist=
+command line returns -EPERM, while a built-in driver shadowing a vendor
+module is skipped with a log line and returns 0. Enable zram, zsmalloc
+and the compression algorithms in gki_defconfig.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: SukiSU_patch other/zram/zram_patch/5.10/lz4kd.patch + 本地 Droidspaces lz4/NEON 源码（apply_zram.sh 组装）（本补丁：zram 接线、内建模块黑名单与 gki_defconfig）
+Upstream-Status: Not-Applicable
+KABI: none（修正 kernel/module.c 的黑名单返回值语义）
+Depends-On: 0012 lz4, 0013 lz4k/lz4kd codecs
+Tested-On: yudi 5.10.272（zram lz4kd、黑名单两路径）, 2026-10-29
+---
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 8923c1537..792ab1478 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -863,3 +863,14 @@ CONFIG_FHANDLE=y
+ 
+ # Phase 10.1: NTSync for Wine/Proton.
+ CONFIG_NTSYNC=y
++
++# Phase 10.4: ZRAM LZ4K/LZ4KD with ARM64 NEON.
++CONFIG_ZSMALLOC=y
++CONFIG_ZRAM=y
++CONFIG_CRYPTO_LZO=y
++CONFIG_ZRAM_DEF_COMP_LZ4=y
++CONFIG_CRYPTO_LZ4HC=y
++CONFIG_CRYPTO_LZ4K=y
++CONFIG_CRYPTO_LZ4KD=y
++CONFIG_CRYPTO_842=y
++CONFIG_CRYPTO_LZ4K_OPLUS=y
+diff --git a/drivers/block/zram/Kconfig b/drivers/block/zram/Kconfig
+index fe7a4b7d3..1cc89d069 100644
+--- a/drivers/block/zram/Kconfig
++++ b/drivers/block/zram/Kconfig
+@@ -2,7 +2,7 @@
+ config ZRAM
+ 	tristate "Compressed RAM block device support"
+ 	depends on BLOCK && SYSFS && ZSMALLOC && CRYPTO
+-	select CRYPTO_LZO
++	depends on CRYPTO_LZO || CRYPTO_ZSTD || CRYPTO_LZ4 || CRYPTO_LZ4HC || CRYPTO_842 || CRYPTO_LZ4K || CRYPTO_LZ4K_OPLUS || CRYPTO_LZ4KD || CRYPTO_DEFLATE
+ 	help
+ 	  Creates virtual block devices called /dev/zramX (X = 0, 1, ...).
+ 	  Pages written to these disks are compressed and stored in memory
+@@ -14,6 +14,65 @@ config ZRAM
+ 
+ 	  See Documentation/admin-guide/blockdev/zram.rst for more information.
+ 
++choice
++	prompt "Default zram compressor"
++	default ZRAM_DEF_COMP_LZORLE
++	depends on ZRAM
++
++config ZRAM_DEF_COMP_LZORLE
++	bool "lzo-rle"
++	depends on CRYPTO_LZO
++
++config ZRAM_DEF_COMP_ZSTD
++	bool "zstd"
++	depends on CRYPTO_ZSTD
++
++config ZRAM_DEF_COMP_LZ4
++	bool "lz4"
++	depends on CRYPTO_LZ4
++
++config ZRAM_DEF_COMP_LZO
++	bool "lzo"
++	depends on CRYPTO_LZO
++
++config ZRAM_DEF_COMP_LZ4HC
++	bool "lz4hc"
++	depends on CRYPTO_LZ4HC
++
++config ZRAM_DEF_COMP_842
++	bool "842"
++	depends on CRYPTO_842
++
++config ZRAM_DEF_COMP_LZ4K
++	bool "lz4k"
++	depends on CRYPTO_LZ4K
++	
++config ZRAM_DEF_COMP_LZ4K_OPLUS
++	bool "lz4k"
++	depends on CRYPTO_LZ4K_OPLUS
++
++config ZRAM_DEF_COMP_LZ4KD
++	bool "lz4kd"
++	depends on CRYPTO_LZ4KD
++
++config ZRAM_DEF_COMP_DEFLATE
++	bool "deflate"
++	depends on CRYPTO_DEFLATE
++endchoice
++
++config ZRAM_DEF_COMP
++	string
++	default "lzo-rle" if ZRAM_DEF_COMP_LZORLE
++	default "zstd" if ZRAM_DEF_COMP_ZSTD
++	default "lz4" if ZRAM_DEF_COMP_LZ4
++	default "lzo" if ZRAM_DEF_COMP_LZO
++	default "lz4hc" if ZRAM_DEF_COMP_LZ4HC
++	default "842" if ZRAM_DEF_COMP_842
++	default "lz4k" if ZRAM_DEF_COMP_LZ4K
++	default "lz4k_oplus" if ZRAM_DEF_COMP_LZ4K_OPLUS
++	default "lz4kd" if ZRAM_DEF_COMP_LZ4KD
++	default "deflate" if ZRAM_DEF_COMP_DEFLATE
++
+ config ZRAM_WRITEBACK
+        bool "Write back incompressible or idle page to backing device"
+        depends on ZRAM
+diff --git a/drivers/block/zram/zcomp.c b/drivers/block/zram/zcomp.c
+index b08650417..4d008b295 100644
+--- a/drivers/block/zram/zcomp.c
++++ b/drivers/block/zram/zcomp.c
+@@ -15,14 +15,28 @@
+ #include "zcomp.h"
+ 
+ static const char * const backends[] = {
++#if IS_ENABLED(CONFIG_CRYPTO_LZO)
+ 	"lzo",
+ 	"lzo-rle",
++#endif
+ #if IS_ENABLED(CONFIG_CRYPTO_LZ4)
+ 	"lz4",
+ #endif
+ #if IS_ENABLED(CONFIG_CRYPTO_LZ4HC)
+ 	"lz4hc",
+ #endif
++#if IS_ENABLED(CONFIG_CRYPTO_LZ4K)
++	"lz4k",
++#endif
++#if IS_ENABLED(CONFIG_CRYPTO_LZ4K_OPLUS)
++	"lz4k_oplus",
++#endif
++#if IS_ENABLED(CONFIG_CRYPTO_LZ4KD)
++	"lz4kd",
++#endif
++#if IS_ENABLED(CONFIG_CRYPTO_DEFLATE)
++	"deflate",
++#endif
+ #if IS_ENABLED(CONFIG_CRYPTO_842)
+ 	"842",
+ #endif
+diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
+index 3bfd318c8..488e4b4cc 100644
+--- a/drivers/block/zram/zram_drv.c
++++ b/drivers/block/zram/zram_drv.c
+@@ -42,7 +42,7 @@ static DEFINE_IDR(zram_index_idr);
+ static DEFINE_MUTEX(zram_index_mutex);
+ 
+ static int zram_major;
+-static const char *default_compressor = "lzo-rle";
++static const char *default_compressor = CONFIG_ZRAM_DEF_COMP;
+ 
+ /* Module params (documentation at end) */
+ static unsigned int num_devices = 1;
+diff --git a/kernel/module.c b/kernel/module.c
+index 0750270d1..1a9927b55 100644
+--- a/kernel/module.c
++++ b/kernel/module.c
+@@ -3559,7 +3559,19 @@ int __weak module_frob_arch_sections(Elf_Ehdr *hdr,
+ 
+ /* module_blacklist is a comma-separated list of module names */
+ static char *module_blacklist;
+-static bool blacklisted(const char *module_name)
++static char *custom_module_blacklist[] = {
++#if IS_BUILTIN(CONFIG_CRYPTO_LZO)
++    "lzo", "lzo_rle",
++#endif
++#if IS_BUILTIN(CONFIG_ZRAM)
++    "zram",
++#endif
++#if IS_BUILTIN(CONFIG_ZSMALLOC)
++    "zsmalloc",
++#endif
++};
++
++static bool module_blacklisted_by_param(const char *module_name)
+ {
+ 	const char *p;
+ 	size_t len;
+@@ -3574,6 +3586,18 @@ static bool blacklisted(const char *module_name)
+ 		if (p[len] == ',')
+ 			len++;
+ 	}
++	
++	return false;
++}
++
++static bool builtin_shadowed(const char *module_name)
++{
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(custom_module_blacklist); i++)
++		if (!strcmp(module_name, custom_module_blacklist[i]))
++			return true;
++
+ 	return false;
+ }
+ core_param(module_blacklist, module_blacklist, charp, 0400);
+@@ -4021,11 +4045,15 @@ static int load_module(struct load_info *info, const char __user *uargs,
+ 	 * Now that we know we have the correct module name, check
+ 	 * if it's blacklisted.
+ 	 */
+-	if (blacklisted(info->name)) {
++	if (module_blacklisted_by_param(info->name)) {
+ 		err = -EPERM;
+ 		pr_err("Module %s is blacklisted\n", info->name);
+ 		goto free_copy;
+ 	}
++	if (builtin_shadowed(info->name)) {
++		pr_info("Module %s is built in, skipping\n", info->name);
++		goto free_copy;
++	}
+ 
+ 	err = rewrite_section_headers(info, flags);
+ 	if (err)

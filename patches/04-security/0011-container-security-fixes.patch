@@ -7,8 +7,8 @@ Backport the dcache, overlayfs, cpuset and nfnetlink_log fixes that matter for c
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 
-Origin: 本地整理（来源未记录）
-Upstream-Status: Unknown
+Origin: 上游提交 75f4197f1e11（dcache，CVE-2026-98984）、a1e0eb8f55cf（overlayfs，CVE-2026-68448，代码形态参考 openEuler-1.0-LTS 回移）、e06b678e3b4e（cpuset，CVE-2026-98972）、33d1469b0124（nfnetlink_log，CVE-2026-93288）；本地按 5.10 适配拼合
+Upstream-Status: Backport
 KABI: none
 Depends-On: none
 Tested-On: yudi 5.10.272, 2026-10-29

@@ -57,7 +57,7 @@ B；还有 → 门槛在 health_desc/时序/权限，先修启动侧，内核补
 
 ## 本次发布带上的探针
 
-0019 已加 `CONFIG_ZRAM_WRITEBACK=y`，作为 A 探针随本次内核一起发布。启动后看：
+0024 已加 `CONFIG_ZRAM_WRITEBACK=y`，作为 A 探针随本次内核一起发布。启动后看：
 
 ```sh
 ls /sys/block/zram0 | grep -E 'backing_dev|writeback|bd_stat'

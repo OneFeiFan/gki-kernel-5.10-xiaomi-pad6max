@@ -9,8 +9,8 @@ Enable BLK_DEV_THROTTLING in gki_defconfig.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 
-Origin: 本地整理（来源未记录）
-Upstream-Status: Unknown
+Origin: 本地实现（2026-10-29 检索 refs 全部仓库、GitHub 代码搜索与网页，未找到外部来源；功能清单参考 kernel-workshop-docker 的 defconfig，KABI 方案为自行设计）
+Upstream-Status: Not-Applicable
 KABI: request_queue ANDROID_KABI_RESERVE(1)；__GENKSYMS__ 守卫
 Depends-On: none
 Tested-On: yudi 5.10.272, 2026-10-29

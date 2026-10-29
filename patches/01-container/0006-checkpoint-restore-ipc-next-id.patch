@@ -13,8 +13,8 @@ needs as a container init.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 
-Origin: 本地整理（来源未记录）
-Upstream-Status: Unknown
+Origin: 本地实现（2026-10-29 检索 refs 全部仓库、GitHub 代码搜索与网页，未找到外部来源；side table 按 5.10 的 ipc_ids 布局手写）
+Upstream-Status: Not-Applicable
 KABI: __GENKSYMS__ 守卫（ipc_ids）
 Depends-On: none
 Tested-On: yudi 5.10.272, 2026-10-29

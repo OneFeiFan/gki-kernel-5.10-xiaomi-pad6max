@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Thu, 29 Oct 2026 01:52:56 +0800
+Subject: [PATCH] config: enable BBRv1 and BBRv3
+
+Enable TCP_CONG_ADVANCED, BBR (v1) and BBRv3 in gki_defconfig, keeping
+the default congestion control at cubic.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: WildKernels 5.10 BBRv3 backport, original from Google bbr-v3-2024-02-22-01 (fatalcoder524)（本补丁：gki_defconfig）
+Upstream-Status: Not-Applicable
+KABI: none
+Depends-On: previous three patches
+Tested-On: yudi 5.10.272（r2 构建与开机）, 2026-10-29
+---
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 792ab14..9e6e133 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -874,3 +874,15 @@ CONFIG_CRYPTO_LZ4K=y
+ CONFIG_CRYPTO_LZ4KD=y
+ CONFIG_CRYPTO_842=y
+ CONFIG_CRYPTO_LZ4K_OPLUS=y
++
++# Phase 10.5: BBRv1, KSM, tmpfs xattrs.
++CONFIG_TCP_CONG_ADVANCED=y
++CONFIG_TCP_CONG_BBR=y
++
++# Keep only cubic and BBR when TCP_CONG_ADVANCED is on.
++# CONFIG_TCP_CONG_BIC is not set
++# CONFIG_TCP_CONG_WESTWOOD is not set
++# CONFIG_TCP_CONG_HTCP is not set
++
++# Phase 10.6: BBRv3.
++CONFIG_TCP_CONG_BBR3=y
