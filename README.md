@@ -23,7 +23,7 @@ Wine/Proton。
 | `source/` | 内核源码，构建环境里的 `common/` |
 | `patches/` | 相对 5.10.272 的 15 个功能补丁 |
 | `tools/` | 验证脚本：符号、CRC、配置、结构布局 |
-| `docs/` | 构建与验证、设备状态、模块说明 |
+| `docs/` | 构建与验证、设备状态、模块说明、GPU 交接 |
 
 `source/` 是应用完补丁后的树，不是基线。复现方法见 `patches/README.md`。
 
