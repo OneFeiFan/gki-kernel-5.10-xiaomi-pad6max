@@ -1,21 +1,37 @@
-From 1ff10273ed5e88a039a5f100ec9e83e8b6e36598 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] block: add the ADIOS I/O scheduler
 
 Add ADIOS as an available elevator and fix blk-mq to set hctx before elevator limit_depth(). The vendor init keeps BFQ/cpq as the default.
 
+Enable MQ_IOSCHED_ADIOS in gki_defconfig; the default elevator is
+unchanged.
+
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 ---
- block/Kconfig.iosched |    7 +
- block/Makefile        |    2 +
- block/adios.c         | 2069 +++++++++++++++++++++++++++++++++++++++++
- block/blk-mq.c        |   11 +-
- 4 files changed, 2083 insertions(+), 6 deletions(-)
+ arch/arm64/configs/gki_defconfig |    4 +
+ block/Kconfig.iosched            |    7 +
+ block/Makefile                   |    2 +
+ block/adios.c                    | 2069 ++++++++++++++++++++++++++++++
+ block/blk-mq.c                   |   11 +-
+ 5 files changed, 2087 insertions(+), 6 deletions(-)
  create mode 100644 block/adios.c
 
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 9e6e133..99008e4 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -886,3 +886,7 @@ CONFIG_TCP_CONG_BBR=y
+ 
+ # Phase 10.6: BBRv3.
+ CONFIG_TCP_CONG_BBR3=y
++
++# BBRv3 is available, but the kernel keeps the stock default (cubic).
++# The runtime module selects bbr3 when requested.
++CONFIG_MQ_IOSCHED_ADIOS=y
 diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
-index 64053d67a..886743bbb 100644
+index 64053d6..886743b 100644
 --- a/block/Kconfig.iosched
 +++ b/block/Kconfig.iosched
 @@ -24,6 +24,13 @@ config MQ_IOSCHED_KYBER
@@ -33,7 +49,7 @@ index 64053d67a..886743bbb 100644
  	tristate "BFQ I/O scheduler"
  	help
 diff --git a/block/Makefile b/block/Makefile
-index b9db5d4ed..0ee8757a3 100644
+index b9db5d4..0ee8757 100644
 --- a/block/Makefile
 +++ b/block/Makefile
 @@ -24,6 +24,8 @@ obj-$(CONFIG_MQ_IOSCHED_DEADLINE)	+= mq-deadline.o
@@ -47,7 +63,7 @@ index b9db5d4ed..0ee8757a3 100644
  
 diff --git a/block/adios.c b/block/adios.c
 new file mode 100644
-index 000000000..ddd8fa926
+index 0000000..ddd8fa9
 --- /dev/null
 +++ b/block/adios.c
 @@ -0,0 +1,2069 @@
@@ -2122,7 +2138,7 @@ index 000000000..ddd8fa926
 +MODULE_DESCRIPTION(ADIOS_PROGNAME);
 \ No newline at end of file
 diff --git a/block/blk-mq.c b/block/blk-mq.c
-index 96ede8fa0..75908b931 100644
+index 96ede8f..75908b9 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
 @@ -365,6 +365,10 @@ static struct request *__blk_mq_alloc_request(struct blk_mq_alloc_data *data)

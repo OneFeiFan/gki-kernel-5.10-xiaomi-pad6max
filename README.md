@@ -21,7 +21,7 @@ Wine/Proton。
 | 目录 | 内容 |
 | --- | --- |
 | `source/` | 内核源码，构建环境里的 `common/` |
-| `patches/` | 相对 5.10.272 的 14 个功能补丁 |
+| `patches/` | 相对 5.10.272 的 15 个功能补丁 |
 | `docs/` | 构建与验证、设备状态、模块说明 |
 
 `source/` 是应用完补丁后的树，不是基线。复现方法见 `patches/README.md`。
@@ -66,8 +66,9 @@ fastboot reboot
 
 ## 补丁
 
-补丁在 `patches/`，基线是 `a1eed2e9c`（5.10.272 合并提交）。按 `series`
-顺序应用：
+补丁在 `patches/`，基线是 `a1eed2e9c`（5.10.272 合并提交）。补丁按功能分目录
+（`00-platform/`、`01-container/` … `10-sched/`），`series` 决定应用顺序，任意
+前缀都能单独构建。按 `series` 顺序应用：
 
 ```sh
 cd common

@@ -1,34 +1,58 @@
-From f648923bed2381cc032b0ec0863f881326906282 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] tcp: backport BBRv3 and TCP PLB
 
 Backport BBRv3 and the TCP PLB control, including the cwnd_event guard for a missing private state (bbr3_init() allocates with GFP_ATOMIC).
 
+Enable TCP_CONG_ADVANCED with BBR and BBRv3 in gki_defconfig and drop
+BIC, Westwood and HTCP; cubic stays the default.
+
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 ---
- include/linux/tcp.h            |    6 +
- include/net/tcp.h              |  220 ++-
- include/uapi/linux/inet_diag.h |   25 +
- include/uapi/linux/rtnetlink.h |    4 +-
- net/ipv4/Kconfig               |   22 +
- net/ipv4/Makefile              |    3 +-
- net/ipv4/sysctl_net_ipv4.c     |  125 ++
- net/ipv4/tcp.c                 |    1 +
- net/ipv4/tcp_bbr3.c            | 2368 ++++++++++++++++++++++++++++++++
- net/ipv4/tcp_cong.c            |    1 +
- net/ipv4/tcp_input.c           |   44 +-
- net/ipv4/tcp_ipv4.c            |   13 +
- net/ipv4/tcp_minisocks.c       |    2 +
- net/ipv4/tcp_output.c          |   36 +-
- net/ipv4/tcp_plb.c             |  122 ++
- net/ipv4/tcp_rate.c            |   39 +-
- 16 files changed, 3015 insertions(+), 16 deletions(-)
+ arch/arm64/configs/gki_defconfig |   12 +
+ include/linux/tcp.h              |    6 +
+ include/net/tcp.h                |  220 ++-
+ include/uapi/linux/inet_diag.h   |   25 +
+ include/uapi/linux/rtnetlink.h   |    4 +-
+ net/ipv4/Kconfig                 |   22 +
+ net/ipv4/Makefile                |    3 +-
+ net/ipv4/sysctl_net_ipv4.c       |  125 ++
+ net/ipv4/tcp.c                   |    1 +
+ net/ipv4/tcp_bbr3.c              | 2368 ++++++++++++++++++++++++++++++
+ net/ipv4/tcp_cong.c              |    1 +
+ net/ipv4/tcp_input.c             |   44 +-
+ net/ipv4/tcp_ipv4.c              |   13 +
+ net/ipv4/tcp_minisocks.c         |    2 +
+ net/ipv4/tcp_output.c            |   36 +-
+ net/ipv4/tcp_plb.c               |  122 ++
+ net/ipv4/tcp_rate.c              |   39 +-
+ 17 files changed, 3027 insertions(+), 16 deletions(-)
  create mode 100644 net/ipv4/tcp_bbr3.c
  create mode 100644 net/ipv4/tcp_plb.c
 
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 792ab14..9e6e133 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -874,3 +874,15 @@ CONFIG_CRYPTO_LZ4K=y
+ CONFIG_CRYPTO_LZ4KD=y
+ CONFIG_CRYPTO_842=y
+ CONFIG_CRYPTO_LZ4K_OPLUS=y
++
++# Phase 10.5: BBRv1, KSM, tmpfs xattrs.
++CONFIG_TCP_CONG_ADVANCED=y
++CONFIG_TCP_CONG_BBR=y
++
++# Keep only cubic and BBR when TCP_CONG_ADVANCED is on.
++# CONFIG_TCP_CONG_BIC is not set
++# CONFIG_TCP_CONG_WESTWOOD is not set
++# CONFIG_TCP_CONG_HTCP is not set
++
++# Phase 10.6: BBRv3.
++CONFIG_TCP_CONG_BBR3=y
 diff --git a/include/linux/tcp.h b/include/linux/tcp.h
-index 6d00e1b29..0c7ca7899 100644
+index 6d00e1b..0c7ca78 100644
 --- a/include/linux/tcp.h
 +++ b/include/linux/tcp.h
 @@ -226,7 +226,13 @@ struct tcp_sock {
@@ -46,7 +70,7 @@ index 6d00e1b29..0c7ca7899 100644
  	u32	chrono_stat[3];	/* Time in jiffies for chrono_stat stats */
  	u8	chrono_type:2,	/* current chronograph type */
 diff --git a/include/net/tcp.h b/include/net/tcp.h
-index cad46ae65..9f6125b6e 100644
+index cad46ae..9f6125b 100644
 --- a/include/net/tcp.h
 +++ b/include/net/tcp.h
 @@ -51,6 +51,23 @@ extern struct inet_hashinfo tcp_hashinfo;
@@ -363,7 +387,7 @@ index cad46ae65..9f6125b6e 100644
  static inline s64 tcp_rto_delta_us(const struct sock *sk)
  {
 diff --git a/include/uapi/linux/inet_diag.h b/include/uapi/linux/inet_diag.h
-index 20ee93f0f..06f979332 100644
+index 20ee93f..06f9793 100644
 --- a/include/uapi/linux/inet_diag.h
 +++ b/include/uapi/linux/inet_diag.h
 @@ -229,6 +229,31 @@ struct tcp_bbr_info {
@@ -399,7 +423,7 @@ index 20ee93f0f..06f979332 100644
  
  union tcp_cc_info {
 diff --git a/include/uapi/linux/rtnetlink.h b/include/uapi/linux/rtnetlink.h
-index 5fb40c0c5..2bffd5a95 100644
+index 5fb40c0..2bffd5a 100644
 --- a/include/uapi/linux/rtnetlink.h
 +++ b/include/uapi/linux/rtnetlink.h
 @@ -484,9 +484,11 @@ enum {
@@ -416,7 +440,7 @@ index 5fb40c0c5..2bffd5a95 100644
  struct rta_session {
  	__u8	proto;
 diff --git a/net/ipv4/Kconfig b/net/ipv4/Kconfig
-index 23b06063e..fcfa679f3 100644
+index 23b0606..fcfa679 100644
 --- a/net/ipv4/Kconfig
 +++ b/net/ipv4/Kconfig
 @@ -679,6 +679,24 @@ config TCP_CONG_BBR
@@ -463,7 +487,7 @@ index 23b06063e..fcfa679f3 100644
  
  config TCP_MD5SIG
 diff --git a/net/ipv4/Makefile b/net/ipv4/Makefile
-index d1c8d4beb..6b7a435d3 100644
+index d1c8d4b..6b7a435 100644
 --- a/net/ipv4/Makefile
 +++ b/net/ipv4/Makefile
 @@ -10,7 +10,7 @@ obj-y     := route.o inetpeer.o protocol.o \
@@ -484,7 +508,7 @@ index d1c8d4beb..6b7a435d3 100644
  obj-$(CONFIG_TCP_CONG_CDG) += tcp_cdg.o
  obj-$(CONFIG_TCP_CONG_CUBIC) += tcp_cubic.o
 diff --git a/net/ipv4/sysctl_net_ipv4.c b/net/ipv4/sysctl_net_ipv4.c
-index abbb3c9b9..63c7c4b99 100644
+index abbb3c9..63c7c4b 100644
 --- a/net/ipv4/sysctl_net_ipv4.c
 +++ b/net/ipv4/sysctl_net_ipv4.c
 @@ -27,6 +27,9 @@
@@ -634,7 +658,7 @@ index abbb3c9b9..63c7c4b99 100644
  }
  
 diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
-index deee564a8..3947a9af9 100644
+index deee564..3947a9a 100644
 --- a/net/ipv4/tcp.c
 +++ b/net/ipv4/tcp.c
 @@ -2868,6 +2868,7 @@ int tcp_disconnect(struct sock *sk, int flags)
@@ -647,7 +671,7 @@ index deee564a8..3947a9af9 100644
  	/* Clean up fastopen related fields */
 diff --git a/net/ipv4/tcp_bbr3.c b/net/ipv4/tcp_bbr3.c
 new file mode 100644
-index 000000000..828039719
+index 0000000..8280397
 --- /dev/null
 +++ b/net/ipv4/tcp_bbr3.c
 @@ -0,0 +1,2368 @@
@@ -3020,7 +3044,7 @@ index 000000000..828039719
 +MODULE_DESCRIPTION("TCP BBR (Bottleneck Bandwidth and RTT)");
 +MODULE_VERSION(__stringify(BBR_VERSION));
 diff --git a/net/ipv4/tcp_cong.c b/net/ipv4/tcp_cong.c
-index db5831e6c..153ed9010 100644
+index db5831e..153ed90 100644
 --- a/net/ipv4/tcp_cong.c
 +++ b/net/ipv4/tcp_cong.c
 @@ -179,6 +179,7 @@ void tcp_init_congestion_control(struct sock *sk)
@@ -3032,7 +3056,7 @@ index db5831e6c..153ed9010 100644
  		icsk->icsk_ca_ops->init(sk);
  	if (tcp_ca_needs_ecn(sk))
 diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
-index 84be65728..4384bc5a5 100644
+index 84be657..4384bc5 100644
 --- a/net/ipv4/tcp_input.c
 +++ b/net/ipv4/tcp_input.c
 @@ -361,7 +361,7 @@ static void __tcp_ecn_check_ce(struct sock *sk, const struct sk_buff *skb)
@@ -3145,7 +3169,7 @@ index 84be65728..4384bc5a5 100644
  	tcp_rate_gen(sk, delivered, lost, is_sack_reneg, sack_state.rate);
  	tcp_cong_control(sk, ack, delivered, flag, sack_state.rate);
  	tcp_xmit_recovery(sk, rexmit);
-@@ -3973,7 +4004,7 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
+@@ -3973,7 +4004,7 @@ no_queue:
  	tcp_ack_probe(sk);
  
  	if (tp->tlp_high_seq)
@@ -3171,7 +3195,7 @@ index 84be65728..4384bc5a5 100644
  	    tcp_in_quickack_mode(sk) ||
  	    /* Protocol state mandates a one-time immediate ACK */
 diff --git a/net/ipv4/tcp_ipv4.c b/net/ipv4/tcp_ipv4.c
-index 84504bd03..d1eb9dbce 100644
+index 84504bd..d1eb9db 100644
 --- a/net/ipv4/tcp_ipv4.c
 +++ b/net/ipv4/tcp_ipv4.c
 @@ -2862,6 +2862,7 @@ static void __net_exit tcp_sk_exit(struct net *net)
@@ -3202,7 +3226,7 @@ index 84504bd03..d1eb9dbce 100644
  	if (!net_eq(net, &init_net) &&
  	    bpf_try_module_get(init_net.ipv4.tcp_congestion_control,
 diff --git a/net/ipv4/tcp_minisocks.c b/net/ipv4/tcp_minisocks.c
-index 866055e1b..fc6ec0ed2 100644
+index 866055e..fc6ec0e 100644
 --- a/net/ipv4/tcp_minisocks.c
 +++ b/net/ipv4/tcp_minisocks.c
 @@ -409,6 +409,8 @@ void tcp_ca_openreq_child(struct sock *sk, const struct dst_entry *dst)
@@ -3215,7 +3239,7 @@ index 866055e1b..fc6ec0ed2 100644
  		const struct tcp_congestion_ops *ca;
  
 diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
-index 2c8ed3610..e3e239853 100644
+index 2c8ed36..e3e2398 100644
 --- a/net/ipv4/tcp_output.c
 +++ b/net/ipv4/tcp_output.c
 @@ -322,10 +322,9 @@ static void tcp_ecn_send_syn(struct sock *sk, struct sk_buff *skb)
@@ -3300,7 +3324,7 @@ index 2c8ed3610..e3e239853 100644
  
 diff --git a/net/ipv4/tcp_plb.c b/net/ipv4/tcp_plb.c
 new file mode 100644
-index 000000000..18f4d3bad
+index 0000000..18f4d3b
 --- /dev/null
 +++ b/net/ipv4/tcp_plb.c
 @@ -0,0 +1,122 @@
@@ -3427,7 +3451,7 @@ index 000000000..18f4d3bad
 +}
 +EXPORT_SYMBOL_GPL(tcp_plb_update_state_upon_rto);
 diff --git a/net/ipv4/tcp_rate.c b/net/ipv4/tcp_rate.c
-index 0de693565..b61f06f0b 100644
+index 0de6935..b61f06f 100644
 --- a/net/ipv4/tcp_rate.c
 +++ b/net/ipv4/tcp_rate.c
 @@ -34,6 +34,24 @@

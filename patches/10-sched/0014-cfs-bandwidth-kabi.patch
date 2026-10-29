@@ -1,21 +1,39 @@
-From ce585b6bca0180f9c300ceb1023c1756f101da43 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:57 +0800
 Subject: [PATCH] sched: add kABI-safe CFS bandwidth support
 
 Keep the bandwidth state in separately allocated objects and hide the cfs_rq pointer from genksyms. The pointer sits in the cfs_rq tail padding at 472, android_vendor_data1 stays at 344 and the struct size stays 512; static asserts pin all three.
 
+Enable CFS_BANDWIDTH in gki_defconfig in this patch, so it is never
+built with the stock inline cfs_rq layout.
+
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 ---
- kernel/sched/core.c  |  39 ++++++----
- kernel/sched/debug.c |   4 +-
- kernel/sched/fair.c  | 164 ++++++++++++++++++++++++-------------------
- kernel/sched/pelt.h  |   9 +--
- kernel/sched/sched.h |  72 +++++++++++++++----
- 5 files changed, 180 insertions(+), 108 deletions(-)
+ arch/arm64/configs/gki_defconfig |   3 +
+ kernel/sched/core.c              |  39 +++++---
+ kernel/sched/debug.c             |   4 +-
+ kernel/sched/fair.c              | 164 +++++++++++++++++--------------
+ kernel/sched/pelt.h              |   9 +-
+ kernel/sched/sched.h             |  72 +++++++++++---
+ 6 files changed, 183 insertions(+), 108 deletions(-)
 
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 99008e4..abf0a6a 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -853,6 +853,9 @@ CONFIG_NET_SCH_DEFAULT=y
+ CONFIG_NET_SCH_FQ_PIE=y
+ 
+ # Phase 7: block throttle, net classifier, checkpoint, Btrfs.
++# CFS_BANDWIDTH is enabled with the kABI-safe ext split (cfs_rq_bandwidth /
++# cfs_bandwidth_state); see kernel/sched/sched.h.
++CONFIG_CFS_BANDWIDTH=y
+ CONFIG_BLK_DEV_THROTTLING=y
+ CONFIG_NET_CLS_CGROUP=y
+ CONFIG_CHECKPOINT_RESTORE=y
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index a2171c521..1a5465b51 100644
+index a2171c5..1a5465b 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
 @@ -7450,6 +7450,10 @@ int in_sched_functions(unsigned long addr)
@@ -150,7 +168,7 @@ index a2171c521..1a5465b51 100644
  
  		throttled_usec = cfs_b->throttled_time;
 diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
-index f799bcb36..6d65c4aca 100644
+index f799bcb..6d65c4a 100644
 --- a/kernel/sched/debug.c
 +++ b/kernel/sched/debug.c
 @@ -621,9 +621,9 @@ void print_cfs_rq(struct seq_file *m, int cpu, struct cfs_rq *cfs_rq)
@@ -166,7 +184,7 @@ index f799bcb36..6d65c4aca 100644
  
  #ifdef CONFIG_FAIR_GROUP_SCHED
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index f06acc13f..db4ce63ba 100644
+index f06acc1..db4ce63 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -4840,19 +4840,14 @@ static inline u64 sched_cfs_bandwidth_slice(void)
@@ -344,7 +362,7 @@ index f06acc13f..db4ce63ba 100644
  	raw_spin_unlock(&cfs_b->lock);
  
  	/* update hierarchical throttle state */
-@@ -5134,36 +5131,39 @@ void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
+@@ -5134,36 +5131,39 @@ unthrottle_throttle:
  		resched_curr(rq);
  }
  
@@ -391,7 +409,7 @@ index f06acc13f..db4ce63ba 100644
  			unthrottle_cfs_rq(cfs_rq);
  
  next:
-@@ -5181,7 +5181,8 @@ static void distribute_cfs_runtime(struct cfs_bandwidth *cfs_b)
+@@ -5181,7 +5181,8 @@ next:
   * period the timer is deactivated until scheduling resumes; cfs_b->idle is
   * used to track this state.
   */
@@ -661,7 +679,7 @@ index f06acc13f..db4ce63ba 100644
  		se = kzalloc_node(sizeof(struct sched_entity),
  				  GFP_KERNEL, cpu_to_node(i));
 diff --git a/kernel/sched/pelt.h b/kernel/sched/pelt.h
-index 0245e3e21..469688dde 100644
+index 0245e3e..469688d 100644
 --- a/kernel/sched/pelt.h
 +++ b/kernel/sched/pelt.h
 @@ -151,10 +151,12 @@ static inline u64 rq_clock_pelt(struct rq *rq)
@@ -686,7 +704,7 @@ index 0245e3e21..469688dde 100644
  
 -
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 88696e04a..5c53785f3 100644
+index 88696e0..5c53785 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
 @@ -3,6 +3,8 @@

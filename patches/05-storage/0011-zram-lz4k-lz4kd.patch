@@ -1,12 +1,18 @@
-From ee930c7b6b028d78450de3b84bf531944e4e29db Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] zram: build in LZ4K/LZ4KD with ARM64 NEON
 
 Add the LZ4K, LZ4K-oplus and LZ4KD codecs with the ARM64 NEON accelerator, wire them into zram and the crypto API, and keep the runtime algorithm selection for the KernelSU module.
 
+Carry the built-in zram/zsmalloc/lzo module blacklist here
+(previously in the trailing KMI patch), so the vendor zram.ko and
+zsmalloc.ko loads become no-ops as soon as these are built in. Enable
+zram, zsmalloc and the compression algorithms in gki_defconfig.
+
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 ---
+ arch/arm64/configs/gki_defconfig |   11 +
  crypto/Kconfig                   |   18 +
  crypto/Makefile                  |    2 +
  crypto/lz4.c                     |    8 +-
@@ -21,6 +27,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
  include/linux/lz4.h              |  655 +-----
  include/linux/lz4k.h             |  383 ++++
  include/linux/lz4kd.h            |  326 +++
+ kernel/module.c                  |   23 +-
  lib/Kconfig                      |   13 +
  lib/Makefile                     |    5 +
  lib/lz4/Makefile                 |   10 +-
@@ -53,7 +60,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
  lib/lz4kd/lz4kd_encode_delta.c   |  259 +++
  lib/lz4kd/lz4kd_encode_private.h |  135 ++
  lib/lz4kd/lz4kd_private.h        |  304 +++
- 46 files changed, 12896 insertions(+), 3327 deletions(-)
+ 48 files changed, 12928 insertions(+), 3329 deletions(-)
  create mode 100644 crypto/lz4k.c
  create mode 100644 crypto/lz4kd.c
  create mode 100644 include/linux/lz4k.h
@@ -88,8 +95,27 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
  create mode 100644 lib/lz4kd/lz4kd_encode_private.h
  create mode 100644 lib/lz4kd/lz4kd_private.h
 
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 8923c15..792ab14 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -863,3 +863,14 @@ CONFIG_FHANDLE=y
+ 
+ # Phase 10.1: NTSync for Wine/Proton.
+ CONFIG_NTSYNC=y
++
++# Phase 10.4: ZRAM LZ4K/LZ4KD with ARM64 NEON.
++CONFIG_ZSMALLOC=y
++CONFIG_ZRAM=y
++CONFIG_CRYPTO_LZO=y
++CONFIG_ZRAM_DEF_COMP_LZ4=y
++CONFIG_CRYPTO_LZ4HC=y
++CONFIG_CRYPTO_LZ4K=y
++CONFIG_CRYPTO_LZ4KD=y
++CONFIG_CRYPTO_842=y
++CONFIG_CRYPTO_LZ4K_OPLUS=y
 diff --git a/crypto/Kconfig b/crypto/Kconfig
-index a7b2aa661..fe4826115 100644
+index a7b2aa6..fe48261 100644
 --- a/crypto/Kconfig
 +++ b/crypto/Kconfig
 @@ -1817,6 +1817,24 @@ config CRYPTO_LZ4
@@ -118,7 +144,7 @@ index a7b2aa661..fe4826115 100644
  	tristate "LZ4HC compression algorithm"
  	select CRYPTO_ALGAPI
 diff --git a/crypto/Makefile b/crypto/Makefile
-index 00dd4f033..fb5eb5fd7 100644
+index 00dd4f0..fb5eb5f 100644
 --- a/crypto/Makefile
 +++ b/crypto/Makefile
 @@ -153,6 +153,8 @@ obj-$(CONFIG_CRYPTO_AUTHENC) += authenc.o authencesn.o
@@ -131,7 +157,7 @@ index 00dd4f033..fb5eb5fd7 100644
  obj-$(CONFIG_CRYPTO_842) += 842.o
  obj-$(CONFIG_CRYPTO_RNG2) += rng.o
 diff --git a/crypto/lz4.c b/crypto/lz4.c
-index 0606f8862..650c2cefc 100644
+index 0606f88..650c2ce 100644
 --- a/crypto/lz4.c
 +++ b/crypto/lz4.c
 @@ -81,7 +81,13 @@ static int lz4_compress_crypto(struct crypto_tfm *tfm, const u8 *src,
@@ -150,7 +176,7 @@ index 0606f8862..650c2cefc 100644
  	if (out_len < 0)
  		return -EINVAL;
 diff --git a/crypto/lz4hc.c b/crypto/lz4hc.c
-index d7cc94aa2..e562d642f 100644
+index d7cc94a..e562d64 100644
 --- a/crypto/lz4hc.c
 +++ b/crypto/lz4hc.c
 @@ -82,7 +82,13 @@ static int lz4hc_compress_crypto(struct crypto_tfm *tfm, const u8 *src,
@@ -170,7 +196,7 @@ index d7cc94aa2..e562d642f 100644
  		return -EINVAL;
 diff --git a/crypto/lz4k.c b/crypto/lz4k.c
 new file mode 100644
-index 000000000..8fd761f96
+index 0000000..8fd761f
 --- /dev/null
 +++ b/crypto/lz4k.c
 @@ -0,0 +1,95 @@
@@ -271,7 +297,7 @@ index 000000000..8fd761f96
 +MODULE_ALIAS_CRYPTO("lz4k");
 diff --git a/crypto/lz4kd.c b/crypto/lz4kd.c
 new file mode 100644
-index 000000000..2f0ce0d6b
+index 0000000..2f0ce0d
 --- /dev/null
 +++ b/crypto/lz4kd.c
 @@ -0,0 +1,136 @@
@@ -412,7 +438,7 @@ index 000000000..2f0ce0d6b
 +MODULE_DESCRIPTION("LZ4KD Compression Algorithm");
 +MODULE_ALIAS_CRYPTO("lz4kd");
 diff --git a/drivers/block/zram/Kconfig b/drivers/block/zram/Kconfig
-index fe7a4b7d3..1cc89d069 100644
+index fe7a4b7..1cc89d0 100644
 --- a/drivers/block/zram/Kconfig
 +++ b/drivers/block/zram/Kconfig
 @@ -2,7 +2,7 @@
@@ -491,7 +517,7 @@ index fe7a4b7d3..1cc89d069 100644
         bool "Write back incompressible or idle page to backing device"
         depends on ZRAM
 diff --git a/drivers/block/zram/zcomp.c b/drivers/block/zram/zcomp.c
-index b08650417..4d008b295 100644
+index b086504..4d008b2 100644
 --- a/drivers/block/zram/zcomp.c
 +++ b/drivers/block/zram/zcomp.c
 @@ -15,14 +15,28 @@
@@ -524,7 +550,7 @@ index b08650417..4d008b295 100644
  	"842",
  #endif
 diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
-index 3bfd318c8..488e4b4cc 100644
+index 3bfd318..488e4b4 100644
 --- a/drivers/block/zram/zram_drv.c
 +++ b/drivers/block/zram/zram_drv.c
 @@ -42,7 +42,7 @@ static DEFINE_IDR(zram_index_idr);
@@ -537,7 +563,7 @@ index 3bfd318c8..488e4b4cc 100644
  /* Module params (documentation at end) */
  static unsigned int num_devices = 1;
 diff --git a/fs/f2fs/compress.c b/fs/f2fs/compress.c
-index 2c3b96ba5..7f28eb31d 100644
+index 2c3b96b..7f28eb3 100644
 --- a/fs/f2fs/compress.c
 +++ b/fs/f2fs/compress.c
 @@ -300,8 +300,13 @@ static int lz4_decompress_pages(struct decompress_io_ctx *dic)
@@ -556,7 +582,7 @@ index 2c3b96ba5..7f28eb31d 100644
  		printk_ratelimited("%sF2FS-fs (%s): lz4 decompress failed, ret:%d\n",
  				KERN_ERR, dic->sbi->sb->s_id, ret);
 diff --git a/fs/incfs/data_mgmt.c b/fs/incfs/data_mgmt.c
-index 6381f8fd4..40297c33d 100644
+index 6381f8f..40297c3 100644
 --- a/fs/incfs/data_mgmt.c
 +++ b/fs/incfs/data_mgmt.c
 @@ -472,8 +472,11 @@ static ssize_t decompress(struct mount_info *mi,
@@ -574,7 +600,7 @@ index 6381f8fd4..40297c33d 100644
  			return -EBADMSG;
  		return result;
 diff --git a/include/linux/lz4.h b/include/linux/lz4.h
-index b16e15b95..b2972c314 100644
+index b16e15b..b2972c3 100644
 --- a/include/linux/lz4.h
 +++ b/include/linux/lz4.h
 @@ -1,648 +1,17 @@
@@ -1241,7 +1267,7 @@ index b16e15b95..b2972c314 100644
 \ No newline at end of file
 diff --git a/include/linux/lz4k.h b/include/linux/lz4k.h
 new file mode 100644
-index 000000000..6e73161b1
+index 0000000..6e73161
 --- /dev/null
 +++ b/include/linux/lz4k.h
 @@ -0,0 +1,383 @@
@@ -1630,7 +1656,7 @@ index 000000000..6e73161b1
 +#endif /* _LZ4K_H */
 diff --git a/include/linux/lz4kd.h b/include/linux/lz4kd.h
 new file mode 100644
-index 000000000..cef922d1e
+index 0000000..cef922d
 --- /dev/null
 +++ b/include/linux/lz4kd.h
 @@ -0,0 +1,326 @@
@@ -1960,8 +1986,62 @@ index 000000000..cef922d1e
 +
 +
 +#endif /* _LZ4KD_H */
+diff --git a/kernel/module.c b/kernel/module.c
+index 0750270..7ae8e3c 100644
+--- a/kernel/module.c
++++ b/kernel/module.c
+@@ -3559,13 +3559,26 @@ int __weak module_frob_arch_sections(Elf_Ehdr *hdr,
+ 
+ /* module_blacklist is a comma-separated list of module names */
+ static char *module_blacklist;
++static char *custom_module_blacklist[] = {
++#if IS_BUILTIN(CONFIG_CRYPTO_LZO)
++    "lzo", "lzo_rle",
++#endif
++#if IS_BUILTIN(CONFIG_ZRAM)
++    "zram", "oplus_bsp_hybridswap_zram",
++#endif
++#if IS_BUILTIN(CONFIG_ZSMALLOC)
++    "zsmalloc", "oplus_bsp_zsmalloc",
++#endif
++};
++
+ static bool blacklisted(const char *module_name)
+ {
+ 	const char *p;
+ 	size_t len;
++	int i;
+ 
+ 	if (!module_blacklist)
+-		return false;
++		goto custom_blacklist;
+ 
+ 	for (p = module_blacklist; *p; p += len) {
+ 		len = strcspn(p, ",");
+@@ -3574,6 +3587,12 @@ static bool blacklisted(const char *module_name)
+ 		if (p[len] == ',')
+ 			len++;
+ 	}
++	
++custom_blacklist:
++	for (i = 0; i < ARRAY_SIZE(custom_module_blacklist); i++)
++		if (!strcmp(module_name, custom_module_blacklist[i]))
++			return true;
++
+ 	return false;
+ }
+ core_param(module_blacklist, module_blacklist, charp, 0400);
+@@ -4022,7 +4041,7 @@ static int load_module(struct load_info *info, const char __user *uargs,
+ 	 * if it's blacklisted.
+ 	 */
+ 	if (blacklisted(info->name)) {
+-		err = -EPERM;
++		// err = -EPERM;
+ 		pr_err("Module %s is blacklisted\n", info->name);
+ 		goto free_copy;
+ 	}
 diff --git a/lib/Kconfig b/lib/Kconfig
-index 1d41a35ce..04e6a7c43 100644
+index 1d41a35..04e6a7c 100644
 --- a/lib/Kconfig
 +++ b/lib/Kconfig
 @@ -3,6 +3,7 @@
@@ -1992,7 +2072,7 @@ index 1d41a35ce..04e6a7c43 100644
  	select XXHASH
  	tristate
 diff --git a/lib/Makefile b/lib/Makefile
-index ccd416459..310c81725 100644
+index ccd4164..310c817 100644
 --- a/lib/Makefile
 +++ b/lib/Makefile
 @@ -187,6 +187,11 @@ obj-$(CONFIG_LZO_DECOMPRESS) += lzo/
@@ -2008,7 +2088,7 @@ index ccd416459..310c81725 100644
  obj-$(CONFIG_ZSTD_DECOMPRESS) += zstd/
  obj-$(CONFIG_XZ_DEC) += xz/
 diff --git a/lib/lz4/Makefile b/lib/lz4/Makefile
-index 5b42242af..dc6445d23 100644
+index 5b42242..dc6445d 100644
 --- a/lib/lz4/Makefile
 +++ b/lib/lz4/Makefile
 @@ -1,6 +1,8 @@
@@ -2026,7 +2106,7 @@ index 5b42242af..dc6445d23 100644
 +obj-$(CONFIG_ARM64) += $(addprefix lz4armv8/, lz4accel.o lz4armv8.o)
 diff --git a/lib/lz4/lz4.c b/lib/lz4/lz4.c
 new file mode 100644
-index 000000000..112edb700
+index 0000000..112edb7
 --- /dev/null
 +++ b/lib/lz4/lz4.c
 @@ -0,0 +1,3484 @@
@@ -5516,7 +5596,7 @@ index 000000000..112edb700
 +#endif /* LZ4_COMMONDEFS_ONLY */
 diff --git a/lib/lz4/lz4.h b/lib/lz4/lz4.h
 new file mode 100644
-index 000000000..580a2e3f6
+index 0000000..580a2e3
 --- /dev/null
 +++ b/lib/lz4/lz4.h
 @@ -0,0 +1,984 @@
@@ -6506,7 +6586,7 @@ index 000000000..580a2e3f6
 +#endif
 diff --git a/lib/lz4/lz4_compress.c b/lib/lz4/lz4_compress.c
 deleted file mode 100644
-index 90bb67994..000000000
+index 90bb679..0000000
 --- a/lib/lz4/lz4_compress.c
 +++ /dev/null
 @@ -1,940 +0,0 @@
@@ -7452,7 +7532,7 @@ index 90bb67994..000000000
 -MODULE_DESCRIPTION("LZ4 compressor");
 diff --git a/lib/lz4/lz4_decompress.c b/lib/lz4/lz4_decompress.c
 deleted file mode 100644
-index 5b6705c4b..000000000
+index 5b6705c..0000000
 --- a/lib/lz4/lz4_decompress.c
 +++ /dev/null
 @@ -1,720 +0,0 @@
@@ -8178,7 +8258,7 @@ index 5b6705c4b..000000000
 -#endif
 diff --git a/lib/lz4/lz4armv8/lz4accel.c b/lib/lz4/lz4armv8/lz4accel.c
 new file mode 100644
-index 000000000..e7144b4a2
+index 0000000..e7144b4
 --- /dev/null
 +++ b/lib/lz4/lz4armv8/lz4accel.c
 @@ -0,0 +1,48 @@
@@ -8232,7 +8312,7 @@ index 000000000..e7144b4a2
 +};
 diff --git a/lib/lz4/lz4armv8/lz4accel.h b/lib/lz4/lz4armv8/lz4accel.h
 new file mode 100644
-index 000000000..a8862c44a
+index 0000000..a8862c4
 --- /dev/null
 +++ b/lib/lz4/lz4armv8/lz4accel.h
 @@ -0,0 +1,56 @@
@@ -8294,7 +8374,7 @@ index 000000000..a8862c44a
 +#endif
 diff --git a/lib/lz4/lz4armv8/lz4armv8.S b/lib/lz4/lz4armv8/lz4armv8.S
 new file mode 100644
-index 000000000..1d836f686
+index 0000000..1d836f6
 --- /dev/null
 +++ b/lib/lz4/lz4armv8/lz4armv8.S
 @@ -0,0 +1,312 @@
@@ -8612,7 +8692,7 @@ index 000000000..1d836f686
 +SYM_FUNC_END(_lz4_decompress_asm_noprfm)
 diff --git a/lib/lz4/lz4defs.h b/lib/lz4/lz4defs.h
 deleted file mode 100644
-index 673bd206a..000000000
+index 673bd20..0000000
 --- a/lib/lz4/lz4defs.h
 +++ /dev/null
 @@ -1,245 +0,0 @@
@@ -8863,7 +8943,7 @@ index 673bd206a..000000000
 -#endif
 diff --git a/lib/lz4/lz4hc.c b/lib/lz4/lz4hc.c
 new file mode 100644
-index 000000000..f9faf534d
+index 0000000..f9faf53
 --- /dev/null
 +++ b/lib/lz4/lz4hc.c
 @@ -0,0 +1,2809 @@
@@ -11678,7 +11758,7 @@ index 000000000..f9faf534d
 +}
 diff --git a/lib/lz4/lz4hc.h b/lib/lz4/lz4hc.h
 new file mode 100644
-index 000000000..92d2aef17
+index 0000000..92d2aef
 --- /dev/null
 +++ b/lib/lz4/lz4hc.h
 @@ -0,0 +1,451 @@
@@ -12135,7 +12215,7 @@ index 000000000..92d2aef17
 +#endif /* LZ4_HC_STATIC_LINKING_ONLY */
 diff --git a/lib/lz4/lz4hc_compress.c b/lib/lz4/lz4hc_compress.c
 deleted file mode 100644
-index e7ac8694b..000000000
+index e7ac869..0000000
 --- a/lib/lz4/lz4hc_compress.c
 +++ /dev/null
 @@ -1,768 +0,0 @@
@@ -12909,7 +12989,7 @@ index e7ac8694b..000000000
 -MODULE_DESCRIPTION("LZ4 HC compressor");
 diff --git a/lib/lz4k/Makefile b/lib/lz4k/Makefile
 new file mode 100644
-index 000000000..6ea357863
+index 0000000..6ea3578
 --- /dev/null
 +++ b/lib/lz4k/Makefile
 @@ -0,0 +1,2 @@
@@ -12918,7 +12998,7 @@ index 000000000..6ea357863
 \ No newline at end of file
 diff --git a/lib/lz4k/lz4k_decode.c b/lib/lz4k/lz4k_decode.c
 new file mode 100644
-index 000000000..eff9c541c
+index 0000000..eff9c54
 --- /dev/null
 +++ b/lib/lz4k/lz4k_decode.c
 @@ -0,0 +1,310 @@
@@ -13234,7 +13314,7 @@ index 000000000..eff9c541c
 +MODULE_DESCRIPTION("LZ4K decoder");
 diff --git a/lib/lz4k/lz4k_encode.c b/lib/lz4k/lz4k_encode.c
 new file mode 100644
-index 000000000..eeb30d5fa
+index 0000000..eeb30d5
 --- /dev/null
 +++ b/lib/lz4k/lz4k_encode.c
 @@ -0,0 +1,545 @@
@@ -13785,7 +13865,7 @@ index 000000000..eeb30d5fa
 +MODULE_DESCRIPTION("LZ4K encoder");
 diff --git a/lib/lz4k/lz4k_encode_private.h b/lib/lz4k/lz4k_encode_private.h
 new file mode 100644
-index 000000000..781b5f8f7
+index 0000000..781b5f8
 --- /dev/null
 +++ b/lib/lz4k/lz4k_encode_private.h
 @@ -0,0 +1,137 @@
@@ -13928,7 +14008,7 @@ index 000000000..781b5f8f7
 +
 diff --git a/lib/lz4k/lz4k_private.h b/lib/lz4k/lz4k_private.h
 new file mode 100644
-index 000000000..4f887cf15
+index 0000000..4f887cf
 --- /dev/null
 +++ b/lib/lz4k/lz4k_private.h
 @@ -0,0 +1,269 @@
@@ -14203,7 +14283,7 @@ index 000000000..4f887cf15
 +#endif /* _LZ4K_PRIVATE_H */
 diff --git a/lib/lz4k_oplus/Kconfig b/lib/lz4k_oplus/Kconfig
 new file mode 100644
-index 000000000..f0b962082
+index 0000000..f0b9620
 --- /dev/null
 +++ b/lib/lz4k_oplus/Kconfig
 @@ -0,0 +1,6 @@
@@ -14215,7 +14295,7 @@ index 000000000..f0b962082
 +	  This is the lz4k_oplus algorithm.
 diff --git a/lib/lz4k_oplus/Makefile b/lib/lz4k_oplus/Makefile
 new file mode 100644
-index 000000000..2a8df233a
+index 0000000..2a8df23
 --- /dev/null
 +++ b/lib/lz4k_oplus/Makefile
 @@ -0,0 +1,8 @@
@@ -14229,7 +14309,7 @@ index 000000000..2a8df233a
 +		lz4k_decompress.o
 diff --git a/lib/lz4k_oplus/lz4k.c b/lib/lz4k_oplus/lz4k.c
 new file mode 100644
-index 000000000..39a0d147c
+index 0000000..39a0d14
 --- /dev/null
 +++ b/lib/lz4k_oplus/lz4k.c
 @@ -0,0 +1,90 @@
@@ -14326,7 +14406,7 @@ index 000000000..39a0d147c
 \ No newline at end of file
 diff --git a/lib/lz4k_oplus/lz4k.h b/lib/lz4k_oplus/lz4k.h
 new file mode 100644
-index 000000000..e7f2fc786
+index 0000000..e7f2fc7
 --- /dev/null
 +++ b/lib/lz4k_oplus/lz4k.h
 @@ -0,0 +1,163 @@
@@ -14495,7 +14575,7 @@ index 000000000..e7f2fc786
 +
 diff --git a/lib/lz4k_oplus/lz4k_compress.c b/lib/lz4k_oplus/lz4k_compress.c
 new file mode 100644
-index 000000000..2bacd1eb1
+index 0000000..2bacd1e
 --- /dev/null
 +++ b/lib/lz4k_oplus/lz4k_compress.c
 @@ -0,0 +1,285 @@
@@ -14786,7 +14866,7 @@ index 000000000..2bacd1eb1
 +MODULE_DESCRIPTION("LZ4K compressr");
 diff --git a/lib/lz4k_oplus/lz4k_decompress.c b/lib/lz4k_oplus/lz4k_decompress.c
 new file mode 100644
-index 000000000..2b7690aa3
+index 0000000..2b7690a
 --- /dev/null
 +++ b/lib/lz4k_oplus/lz4k_decompress.c
 @@ -0,0 +1,254 @@
@@ -15046,7 +15126,7 @@ index 000000000..2b7690aa3
 +MODULE_DESCRIPTION("LZ4K decompressr");
 diff --git a/lib/lz4kd/Makefile b/lib/lz4kd/Makefile
 new file mode 100644
-index 000000000..485e0d922
+index 0000000..485e0d9
 --- /dev/null
 +++ b/lib/lz4kd/Makefile
 @@ -0,0 +1,3 @@
@@ -15055,7 +15135,7 @@ index 000000000..485e0d922
 +obj-$(CONFIG_LZ4KD_DECOMPRESS) += lz4kd_decode.o lz4kd_decode_delta.o
 diff --git a/lib/lz4kd/lz4kd_decode.c b/lib/lz4kd/lz4kd_decode.c
 new file mode 100644
-index 000000000..e3829eaa6
+index 0000000..e3829ea
 --- /dev/null
 +++ b/lib/lz4kd/lz4kd_decode.c
 @@ -0,0 +1,243 @@
@@ -15304,7 +15384,7 @@ index 000000000..e3829eaa6
 +MODULE_DESCRIPTION("LZ4K decoder");
 diff --git a/lib/lz4kd/lz4kd_decode_delta.c b/lib/lz4kd/lz4kd_decode_delta.c
 new file mode 100644
-index 000000000..216a5a506
+index 0000000..216a5a5
 --- /dev/null
 +++ b/lib/lz4kd/lz4kd_decode_delta.c
 @@ -0,0 +1,225 @@
@@ -15535,7 +15615,7 @@ index 000000000..216a5a506
 +MODULE_DESCRIPTION("LZ4K decoder");
 diff --git a/lib/lz4kd/lz4kd_encode.c b/lib/lz4kd/lz4kd_encode.c
 new file mode 100644
-index 000000000..37ca9243e
+index 0000000..37ca924
 --- /dev/null
 +++ b/lib/lz4kd/lz4kd_encode.c
 @@ -0,0 +1,418 @@
@@ -15959,7 +16039,7 @@ index 000000000..37ca9243e
 +MODULE_DESCRIPTION("LZ4K encoder");
 diff --git a/lib/lz4kd/lz4kd_encode_delta.c b/lib/lz4kd/lz4kd_encode_delta.c
 new file mode 100644
-index 000000000..9fce71790
+index 0000000..9fce717
 --- /dev/null
 +++ b/lib/lz4kd/lz4kd_encode_delta.c
 @@ -0,0 +1,259 @@
@@ -16224,7 +16304,7 @@ index 000000000..9fce71790
 +MODULE_DESCRIPTION("LZ4K encoder delta");
 diff --git a/lib/lz4kd/lz4kd_encode_private.h b/lib/lz4kd/lz4kd_encode_private.h
 new file mode 100644
-index 000000000..becb1beeb
+index 0000000..becb1be
 --- /dev/null
 +++ b/lib/lz4kd/lz4kd_encode_private.h
 @@ -0,0 +1,135 @@
@@ -16365,7 +16445,7 @@ index 000000000..becb1beeb
 +
 diff --git a/lib/lz4kd/lz4kd_private.h b/lib/lz4kd/lz4kd_private.h
 new file mode 100644
-index 000000000..63b62f044
+index 0000000..63b62f0
 --- /dev/null
 +++ b/lib/lz4kd/lz4kd_private.h
 @@ -0,0 +1,304 @@

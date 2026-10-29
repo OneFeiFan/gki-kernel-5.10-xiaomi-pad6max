@@ -1,4 +1,4 @@
-From 078d0b23dda550179faaec9cb1940cc78fb7ab8d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] fs, net: backport container-relevant security fixes
@@ -14,7 +14,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
  4 files changed, 36 insertions(+), 7 deletions(-)
 
 diff --git a/fs/dcache.c b/fs/dcache.c
-index a1a40759d..842abaf89 100644
+index a1a4075..842abaf 100644
 --- a/fs/dcache.c
 +++ b/fs/dcache.c
 @@ -1442,6 +1442,8 @@ EXPORT_SYMBOL(path_has_submounts);
@@ -36,7 +36,7 @@ index a1a40759d..842abaf89 100644
  		if (!d_mountpoint(dentry)) {
  			dentry->d_flags |= DCACHE_MOUNTED;
 diff --git a/fs/overlayfs/file.c b/fs/overlayfs/file.c
-index 924444f31..4b530a462 100644
+index 924444f..4b530a4 100644
 --- a/fs/overlayfs/file.c
 +++ b/fs/overlayfs/file.c
 @@ -14,6 +14,7 @@
@@ -81,7 +81,7 @@ index 924444f31..4b530a462 100644
  	case OVL_COPY:
  		ret = vfs_copy_file_range(real_in.file, pos_in,
 diff --git a/kernel/cgroup/cpuset.c b/kernel/cgroup/cpuset.c
-index f0f5dc3cb..61d253b98 100644
+index f0f5dc3..61d253b 100644
 --- a/kernel/cgroup/cpuset.c
 +++ b/kernel/cgroup/cpuset.c
 @@ -413,10 +413,12 @@ static inline void check_insane_mems_config(nodemask_t *nodes)
@@ -108,7 +108,7 @@ index f0f5dc3cb..61d253b98 100644
  		cpumask_copy(top_cpuset.cpus_allowed, cpu_possible_mask);
  		top_cpuset.mems_allowed = node_possible_map;
 diff --git a/net/netfilter/nfnetlink_log.c b/net/netfilter/nfnetlink_log.c
-index d5c553d10..8d5b2ca0b 100644
+index d5c553d..8d5b2ca 100644
 --- a/net/netfilter/nfnetlink_log.c
 +++ b/net/netfilter/nfnetlink_log.c
 @@ -1124,21 +1124,26 @@ static int __net_init nfnl_log_net_init(struct net *net)

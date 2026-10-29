@@ -1,4 +1,4 @@
-From c3a9d9ba2303faae888d46ece8123849f252f459 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:55 +0800
 Subject: [PATCH] futex, epoll: backport futex_waitv and epoll_pwait2
@@ -18,7 +18,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>
  8 files changed, 499 insertions(+), 29 deletions(-)
 
 diff --git a/arch/arm64/include/asm/unistd.h b/arch/arm64/include/asm/unistd.h
-index 3cb206aea..6bdb5f5db 100644
+index 3cb206a..6bdb5f5 100644
 --- a/arch/arm64/include/asm/unistd.h
 +++ b/arch/arm64/include/asm/unistd.h
 @@ -38,7 +38,7 @@
@@ -31,7 +31,7 @@ index 3cb206aea..6bdb5f5db 100644
  
  #define __ARCH_WANT_SYS_CLONE
 diff --git a/arch/arm64/include/asm/unistd32.h b/arch/arm64/include/asm/unistd32.h
-index 7a869335d..45b307d8f 100644
+index 7a86933..45b307d 100644
 --- a/arch/arm64/include/asm/unistd32.h
 +++ b/arch/arm64/include/asm/unistd32.h
 @@ -889,8 +889,12 @@ __SYSCALL(__NR_pidfd_getfd, sys_pidfd_getfd)
@@ -48,7 +48,7 @@ index 7a869335d..45b307d8f 100644
  /*
   * Please add new compat syscalls above this comment and update
 diff --git a/fs/eventpoll.c b/fs/eventpoll.c
-index 3114ab294..c69d46133 100644
+index 3114ab2..c69d461 100644
 --- a/fs/eventpoll.c
 +++ b/fs/eventpoll.c
 @@ -1806,15 +1806,25 @@ static int ep_send_events(struct eventpoll *ep,
@@ -139,7 +139,7 @@ index 3114ab294..c69d46133 100644
  
  error_fput:
  	fdput(f);
-@@ -2382,16 +2390,19 @@ static int do_epoll_wait(int epfd, struct epoll_event __user *events,
+@@ -2382,16 +2390,19 @@ error_fput:
  SYSCALL_DEFINE4(epoll_wait, int, epfd, struct epoll_event __user *, events,
  		int, maxevents, int, timeout)
  {
@@ -258,7 +258,7 @@ index 3114ab294..c69d46133 100644
  
  static int __init eventpoll_init(void)
 diff --git a/include/linux/syscalls.h b/include/linux/syscalls.h
-index 478b827bc..fb30e8962 100644
+index 478b827..fb30e89 100644
 --- a/include/linux/syscalls.h
 +++ b/include/linux/syscalls.h
 @@ -58,6 +58,7 @@ struct mq_attr;
@@ -293,7 +293,7 @@ index 478b827bc..fb30e8962 100644
  /* kernel/hrtimer.c */
  asmlinkage long sys_nanosleep(struct __kernel_timespec __user *rqtp,
 diff --git a/include/uapi/asm-generic/unistd.h b/include/uapi/asm-generic/unistd.h
-index 03fb22304..db1f2e9b1 100644
+index 03fb223..db1f2e9 100644
 --- a/include/uapi/asm-generic/unistd.h
 +++ b/include/uapi/asm-generic/unistd.h
 @@ -859,11 +859,15 @@ __SYSCALL(__NR_pidfd_getfd, sys_pidfd_getfd)
@@ -314,7 +314,7 @@ index 03fb22304..db1f2e9b1 100644
  /*
   * 32 bit systems traditionally used different
 diff --git a/include/uapi/linux/futex.h b/include/uapi/linux/futex.h
-index a89eb0acc..8250a93c3 100644
+index a89eb0a..8250a93 100644
 --- a/include/uapi/linux/futex.h
 +++ b/include/uapi/linux/futex.h
 @@ -41,6 +41,31 @@
@@ -350,10 +350,10 @@ index a89eb0acc..8250a93c3 100644
   * Support for robust futexes: the kernel cleans up held futexes at
   * thread exit time.
 diff --git a/kernel/futex/core.c b/kernel/futex/core.c
-index 012d837a6..db7708599 100644
+index 012d837..db77085 100644
 --- a/kernel/futex/core.c
 +++ b/kernel/futex/core.c
-@@ -4018,6 +4018,358 @@ COMPAT_SYSCALL_DEFINE3(get_robust_list, int, pid,
+@@ -4018,6 +4018,358 @@ err_unlock:
  }
  #endif /* CONFIG_COMPAT */
  
@@ -713,7 +713,7 @@ index 012d837a6..db7708599 100644
  SYSCALL_DEFINE6(futex_time32, u32 __user *, uaddr, int, op, u32, val,
  		struct old_timespec32 __user *, utime, u32 __user *, uaddr2,
 diff --git a/kernel/sys_ni.c b/kernel/sys_ni.c
-index 8ae259772..26b677d57 100644
+index 8ae2597..26b677d 100644
 --- a/kernel/sys_ni.c
 +++ b/kernel/sys_ni.c
 @@ -67,6 +67,7 @@ COND_SYSCALL(eventfd2);

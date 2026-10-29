@@ -31,10 +31,10 @@
 | 项目 | 值 |
 |---|---|
 | 源码 | `~/kernel-sources/vanilla-root/common` |
-| 分支 | `cfs-bandwidth` |
-| HEAD | `f249115d`（14 个功能补丁） |
+| 分支 | `restructured-20261029`（旧 `cfs-bandwidth` 保留） |
+| HEAD | `2cdee214e`（15 个功能补丁） |
 | 构建输出 | `~/kernel-sources/out` |
-| 补丁 | 14 个，基线 `a1eed2e9c`，源码树 `6c6605b1` |
+| 补丁 | 15 个，基线 `a1eed2e9c`，源码树 `24bbf84f` |
 | GitHub | `OneFeiFan/gki-kernel-5.10-xiaomi-pad6max`，`pad6max` 快照分支 |
 
 ## 驱动分层

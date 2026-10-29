@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Thu, 29 Oct 2026 01:52:55 +0800
+Subject: [PATCH] gki_defconfig: enable config-only extras
+
+KSM, tmpfs xattrs/POSIX ACLs and Btrfs need no code changes and leave
+the KMI as is.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ arch/arm64/configs/gki_defconfig | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index abf0a6a..d4fbd6c 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -863,6 +863,8 @@ CONFIG_UNIX_DIAG=y
+ CONFIG_PACKET_DIAG=y
+ CONFIG_NETLINK_DIAG=y
+ CONFIG_FHANDLE=y
++CONFIG_BTRFS_FS=y
++CONFIG_BTRFS_FS_POSIX_ACL=y
+ 
+ # Phase 10.1: NTSync for Wine/Proton.
+ CONFIG_NTSYNC=y
+@@ -881,6 +883,9 @@ CONFIG_CRYPTO_LZ4K_OPLUS=y
+ # Phase 10.5: BBRv1, KSM, tmpfs xattrs.
+ CONFIG_TCP_CONG_ADVANCED=y
+ CONFIG_TCP_CONG_BBR=y
++CONFIG_KSM=y
++CONFIG_TMPFS_XATTR=y
++CONFIG_TMPFS_POSIX_ACL=y
+ 
+ # Keep only cubic and BBR when TCP_CONG_ADVANCED is on.
+ # CONFIG_TCP_CONG_BIC is not set
