@@ -20,6 +20,9 @@ Wine/Proton。
 的 A 探针），见 [docs/kernel.md](docs/kernel.md) 与
 [docs/ExtM-research.md](docs/ExtM-research.md)。
 
+cpuidle governor 默认跟随系统（`qcom-cpu-lpm`）；`yudi-tweaks` 1.6 提供 TEO 的
+运行时开关，保存时立即切换，重启后按配置保持。
+
 ## 生态调研
 
 2026-10-30 对 10 个方向做了只读盘点，结论和差距见

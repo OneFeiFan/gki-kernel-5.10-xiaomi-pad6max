@@ -5,6 +5,9 @@
 2026-10-31 更新：基线已从 `a1eed2e9c` 升到 ACK lts 最新 `8059ae2`；Linux stable
 5.10.273 仍未合入 ACK，安全缺口和本报告的判断不变。
 
+2026-10-31 补充：TEO 和 UCLAMP 实际已在 ACK 5.10 基线里；yudi-tweaks 1.6 增加了
+TEO 运行时开关，UCLAMP 默认值保持 1024/1024/0，BORE 仍未做。
+
 ## 方法
 
 项目重启后，为了确认"我们现在的优化和生态相比还差什么"，按方向拆成 10 个子代理并行收集：
@@ -24,7 +27,7 @@ yudi 机型、中文社区。子代理只负责找事实和来源，不做取舍
 | zram | ExtM B + MIUI zram 统计（LowTension 5.10.237 公开树）；ZRAM_MULTI_COMP | LZ4K/LZ4KD + ExtM A 探针 | 维持不做 B |
 | zstd | 1.5.7（ztc/Pzqqt） | 已升 1.5.7，f2fs/crypto/squashfs/incfs/pstore 调用方已适配 | 完成 |
 | 网络 | BBRv3（WildKernels 3a75d65 同源）；Google 2026-09 新版独立 tcp_bbr3.c；PLB 上游只覆盖 IPv6 | BBRv3 + PLB | 可选跟进，不急 |
-| IO/调度/电源 | BORE、TEO、UCLAMP、mq-deadline/Kyber 修复 | ADIOS + blk-mq depth | 不在原目标，不加 |
+| IO/调度/电源 | BORE、TEO、UCLAMP、mq-deadline/Kyber 修复 | ADIOS + blk-mq depth；TEO/UCLAMP 已随 ACK 基线在内 | TEO 加运行时开关；UCLAMP 不改默认；BORE 不做 |
 | 文件系统 | EROFS zstd 回移（7c442bbe，来源待核对）；f2fs 修复 | fs/erofs 没有 zstd 代码；f2fs 已用 1.5.7 | 低优先，f2fs 修复随 5.10.273 |
 | 加固 | GrapheneOS 5.10 已归档；DivestedOS 硬化补丁 | 无额外硬化 | 不做 |
 | 设备证据 | Star-ZER0、lkm4ctr 免刷内核跑 Docker、AOSPA 配置 | KMI 7298/0/0，670 个 vendor 模块 0 失败 | 路线可行 |
@@ -173,8 +176,8 @@ kernel_patches 有 4.4–5.15 的硬化补丁。结论：没有现成可跟的�
    0011 里的 dcache 段去掉（已进 5.10.273），其余 3 个 CVE 保留；重放 26 个补丁，
    跑 KMI/模块/开机/容器/zram 门禁。
 2. MGLRU 不做（理由见上）。
-3. ExtM B 维持不做；ZRAM_MULTI_COMP、EROFS zstd、BORE/TEO/UCLAMP、Google 新版
-   BBRv3 都不主动做。
+3. ExtM B 维持不做；ZRAM_MULTI_COMP、EROFS zstd、BORE、Google 新版 BBRv3 不主动做。
+   TEO/UCLAMP 已在基线里：TEO 由 yudi-tweaks 1.6 提供运行时开关，UCLAMP 默认值不改。
 4. 用户 2026-10-30 决定：先归档，不改内核。以后启动时按第 1 条开始。
 
 ## 来源（主要）

@@ -131,6 +131,24 @@ per-node 的 kcompressd 线程，压缩和写回不再占用回收线程。
   `pswpout` 增加约 238 万页，kcompressd CPU 90→449 ticks、kswapd 149→580，
   无 OOM/panic
 
+## cpuidle governor（TEO）
+
+ACK 的 5.10 基线已经带 TEO（`CONFIG_CPU_IDLE_GOV_TEO=y`），设备上
+`available_governors` 是 `menu teo qcom-cpu-lpm`，默认走厂商的 `qcom-cpu-lpm`。
+
+yudi-tweaks 1.6 增加 `GOV` 开关（跟随系统 / teo / qcom-cpu-lpm）：WebUI 保存时
+立即写 `current_governor`，重启后由 `service.sh` 再应用；选「跟随系统」时模块
+不写 governor。
+
+2026-10-31 熄屏 3 分钟的 A/B（8 核合计，单次采样，设备在充电）：
+
+| governor | C4 时间 | WFI 时间 | 深睡占比 |
+| --- | --- | --- | --- |
+| qcom-cpu-lpm | 1372.5s | 31.7s | 97.74% |
+| teo | 1409.0s | 18.3s | 98.72% |
+
+TEO 的深睡占比略高，没有异常；功耗和唤醒延迟没有测，默认仍保持厂商 governor。
+
 ## 灰度与探针
 
 - `CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y`（0023）：默认启用 power-efficient
@@ -153,3 +171,5 @@ per-node 的 kcompressd 线程，压缩和写回不再占用回收线程。
 - 基线是 ACK `8059ae2`（Linux 5.10.272）；ACK 还没合入 Linux stable 5.10.273，
   安全缺口见 [ecosystem-survey.md](ecosystem-survey.md)。ACK 10 月的 ASB 修复
   旧基线里已经通过其他提交合入，升到 8059ae2 没有新增安全修复。
+- UCLAMP 由 ACK 基线自带（`UCLAMP_TASK`、`UCLAMP_TASK_GROUP`，20 个 bucket），
+  `sched_util_clamp_min/max` 默认 1024/1024、`min_rt_default=0`；没有改默认值。

@@ -36,8 +36,9 @@
 | 构建输出 | `~/kernel-sources/out-8059` |
 | 补丁 | 26 个，基线 `8059ae2`，源码树 `146fd5e7b5` |
 | 镜像 | r5 只在本地（未发布）；最后发布的是 r3 |
-| 灰度 | `WQ_POWER_EFFICIENT_DEFAULT=y`；zram writeback（ExtM A 探针）；Kcompressd（默认启用） |
+| 灰度 | `WQ_POWER_EFFICIENT_DEFAULT=y`；zram writeback（ExtM A 探针）；Kcompressd（默认启用）；cpuidle governor 默认跟随系统（yudi-tweaks 1.6 可切 TEO） |
 | GitHub | `OneFeiFan/gki-kernel-5.10-xiaomi-pad6max`，`pad6max` 快照分支 |
+| 模块 | yudi-tweaks 1.6（含 cpuidle governor 开关）；ntsync 1.1 |
 
 ## 驱动分层
 
