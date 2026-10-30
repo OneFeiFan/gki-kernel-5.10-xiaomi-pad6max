@@ -20,6 +20,11 @@ Wine/Proton。
 的 A 探针），见 [docs/kernel.md](docs/kernel.md) 与
 [docs/ExtM-research.md](docs/ExtM-research.md)。
 
+## 生态调研
+
+2026-10-30 对 10 个方向做了只读盘点，结论和差距见
+[docs/ecosystem-survey.md](docs/ecosystem-survey.md)。只归档，没有据此改内核。
+
 ## 仓库结构
 
 | 目录 | 内容 |
@@ -27,7 +32,7 @@ Wine/Proton。
 | `source/` | 内核源码，构建环境里的 `common/` |
 | `patches/` | 相对 5.10.272 的 26 个功能补丁 |
 | `tools/` | 验证脚本：符号、CRC、配置、结构布局 |
-| `docs/` | 构建与验证、设备状态、模块说明、GPU/ExtM 研究 |
+| `docs/` | 构建与验证、设备状态、模块说明、GPU/ExtM 研究、生态调研 |
 
 `source/` 是应用完补丁后的树，不是基线。复现方法见 `patches/README.md`。
 

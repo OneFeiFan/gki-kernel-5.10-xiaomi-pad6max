@@ -145,4 +145,5 @@ per-node 的 kcompressd 线程，压缩和写回不再占用回收线程。
 - 内核默认保持 stock：`cubic`、BFQ/cpq、zram `lz4`、KSM 关闭、ADIOS 不作为默认。
   这些由 `yudi-tweaks` 模块在开机后调整。
 - 没有开启 `CONFIG_DEBUG_INFO_BTF`，CO-RE eBPF 程序不能用。
-- 安全基线是 5.10.272，尚未合并更新的 `android12-5.10-lts`。
+- 安全基线是 5.10.272；5.10.273 与 ACK 10 月的安全提交尚未合并，差距见
+  [ecosystem-survey.md](ecosystem-survey.md)。
