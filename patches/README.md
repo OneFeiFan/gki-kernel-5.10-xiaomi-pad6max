@@ -1,17 +1,21 @@
 # 内核补丁
 
-基线是 AOSP `android12-5.10-lts` 的 5.10.272 合并提交 `a1eed2e9c`。
+基线是 AOSP `android12-5.10-lts` 的最新提交 `8059ae2`（2026-10-24）。
 按 `series` 顺序应用后得到的内核源码树（不含本目录）：
 
 ```
-4fa856c968d0bcdfa3643df019e2464adede7f08
+146fd5e7b5919d34a1580e73028aa93b35660c39
 ```
+
+2026-10-31 基线从 `a1eed2e9c` 升到 ACK lts 最新 `8059ae2`。两者对源码树的净差异
+只有 `net/can/bcm.c` 的一处回退：ASB 的安全修复在旧基线里已经通过其他提交合入。
+26 个补丁原样重放，没有冲突。0011 的 dcache 段保留（本次不使用 Linux stable 5.10.273）。
 
 ## 应用
 
 ```sh
 cd common
-git checkout a1eed2e9c
+git checkout 8059ae2
 PATCHES=/path/to/gki-yudi/patches
 while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series"
 ```

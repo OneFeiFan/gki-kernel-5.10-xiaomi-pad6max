@@ -1,6 +1,6 @@
 # GKI 5.10.272 for Xiaomi Pad 6 Max
 
-基于 AOSP `android12-5.10-lts`（5.10.272）的自编译内核，设备是小米平板 6 Max
+基于 AOSP `android12-5.10-lts`（ACK `8059ae2`，Linux 5.10.272）的自编译内核，设备是小米平板 6 Max
 （yudi，SM8475）。目标是保持原厂 KMI 不变，同时能跑容器、Droidspaces 和
 Wine/Proton。
 
@@ -24,6 +24,9 @@ Wine/Proton。
 
 2026-10-30 对 10 个方向做了只读盘点，结论和差距见
 [docs/ecosystem-survey.md](docs/ecosystem-survey.md)。只归档，没有据此改内核。
+
+2026-10-31 基线已升到 ACK lts 最新 `8059ae2`；Linux stable 5.10.273 尚未合入
+ACK，补丁仍是 26 个。
 
 ## 仓库结构
 
@@ -59,16 +62,17 @@ bash build/build.sh -j12
 
 ## 刷机
 
-镜像有两个版本，内核相同，ramdisk 不同：
+镜像有两个版本，内核相同，ramdisk 不同。最后一次发布的是 r3（2026-10-30）；r4 和
+r5 只在本地构建，没有上传。
 
 | 镜像 | 内容 |
 | --- | --- |
-| `yudi-5.10.272-20261029-ksu.img` | KernelSU |
-| `yudi-5.10.272-20261029-noroot.img` | 无 root |
+| `yudi-5.10.272-20261030-r3-ksu.img` | KernelSU |
+| `yudi-5.10.272-20261030-r3-noroot.img` | 无 root |
 
 ```sh
 adb reboot bootloader
-fastboot flash boot_a yudi-5.10.272-20261029-ksu.img
+fastboot flash boot_a yudi-5.10.272-20261030-r3-ksu.img
 fastboot reboot
 ```
 
@@ -76,13 +80,13 @@ fastboot reboot
 
 ## 补丁
 
-补丁在 `patches/`，基线是 `a1eed2e9c`（5.10.272 合并提交）。补丁按功能分目录
+补丁在 `patches/`，基线是 `8059ae2`（ACK `android12-5.10-lts`，2026-10-24）。补丁按功能分目录
 （`00-platform/`、`01-container/` … `10-sched/`），`series` 决定应用顺序，任意
 前缀都能单独构建。按 `series` 顺序应用：
 
 ```sh
 cd common
-git checkout a1eed2e9c
+git checkout 8059ae2
 while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series"
 ```
 
@@ -97,13 +101,14 @@ while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series"
 
 ## 验证
 
-以下为 2026-10-29 实测结果，详细步骤见 [docs/kernel.md](docs/kernel.md)。
+以下为 2026-10-31 r5 的快速验证结果；NTSync/futex/epoll 和 CFS/zram 往返是
+2026-10-30 r4 的结果，r5 没有重跑这些用例。详细步骤见 [docs/kernel.md](docs/kernel.md)。
 
-- 7298 个导出符号，与 5.10.272 基线 CRC 差异 0
+- 7298 个导出符号，与 stock 和 r4 的 CRC 差异 0
 - 355 个 `vendor_boot` 模块、315 个 `vendor_dlkm` 模块，CRC 不匹配 0
-- 设备开机 420 个模块，`dmesg` 无 CRC 或 WARNING
-- NTSync v2 自测 11/11，futex_waitv 7/7，epoll 63/63
-- CFS 带宽 20% 配额下 `nr_throttled` 正常增长，zram 各算法往返一致
+- 设备开机 421 个模块，`dmesg` 无 CRC 错误、无 panic/Oops
+- NTSync v2 自测 11/11，futex_waitv 7/7，epoll 63/63（r4）
+- CFS 带宽 20% 配额下 `nr_throttled` 正常增长，zram 各算法往返一致（r4）
 
 verify 脚本还有两个已知误报：ipvlan 用例在同一个 dummy 上先建 macvlan 再建
 ipvlan（两者争用 RX handler，必然 EBUSY）；设备自带的 `ss` 是

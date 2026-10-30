@@ -1,8 +1,8 @@
 # 系统状态交接（yudi）
 
-日期：2026-10-29。给后续驱动工作留的现状记录，内核构建和补丁见
+日期：2026-10-31。给后续驱动工作留的现状记录，内核构建和补丁见
 [`kernel.md`](kernel.md) 与仓库 `patches/`。除特别说明外，表中的数值都是
-2026-10-29 的采样值。
+2026-10-29 到 2026-10-31 的采样值。
 
 ## 设备与系统
 
@@ -16,7 +16,7 @@
 | 内存 | 约 15.9GB |
 | CPU | 8 核，小核 2.016GHz，中核 2.7456GHz，大核 3.1872GHz，`walt` |
 | 启动槽 | `_a`，bootloader 已解锁，SELinux Enforcing |
-| 当前内核 | 5.10.272，见 `uname -r` |
+| 当前内核 | `5.10.272-android12-9-gd1ee54224e22`（r5，2026-10-31） |
 
 两个容易踩的点：
 
@@ -31,10 +31,11 @@
 | 项目 | 值 |
 |---|---|
 | 源码 | `~/kernel-sources/vanilla-root/common` |
-| 分支 | `p0-series`（旧 `cfs-bandwidth` 保留） |
-| HEAD | `a10996c3f`（26 个功能补丁） |
-| 构建输出 | `~/kernel-sources/out-zram` |
-| 补丁 | 26 个，基线 `a1eed2e9c`，源码树 `4fa856c9` |
+| 分支 | `p0-series-273`（旧 `p0-series` 保留） |
+| HEAD | `d1ee54224`（26 个功能补丁） |
+| 构建输出 | `~/kernel-sources/out-8059` |
+| 补丁 | 26 个，基线 `8059ae2`，源码树 `146fd5e7b5` |
+| 镜像 | r5 只在本地（未发布）；最后发布的是 r3 |
 | 灰度 | `WQ_POWER_EFFICIENT_DEFAULT=y`；zram writeback（ExtM A 探针）；Kcompressd（默认启用） |
 | GitHub | `OneFeiFan/gki-kernel-5.10-xiaomi-pad6max`，`pad6max` 快照分支 |
 

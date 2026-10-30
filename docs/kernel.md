@@ -6,6 +6,10 @@
 全量构建：增量构建会复用 ThinLTO 缓存，`kernel/configs.c` 的 `.incbin` 不在
 缓存键里，`/proc/config.gz` 可能还是上一次的配置数据，看起来像配置没生效。
 
+当前基线是 ACK `android12-5.10-lts` 的 `8059ae2`（2026-10-24，Linux 5.10.272）；
+26 个补丁应用后的源码树是 `146fd5e7b5`。`8059ae2` 相对旧基线 `a1eed2e9c` 的净差异
+只有 `net/can/bcm.c` 的一处回退；ACK 10 月的 ASB 修复旧基线里已经通过其他提交合入。
+
 ## 门禁
 
 脚本在 `tools/`，用法见 [tools/README.md](../tools/README.md)：
@@ -23,7 +27,7 @@ python3 tools/abi_layout_check.py "$OUT/dist/vmlinux"
 从设备的 `vendor_boot` 和 `vendor_dlkm` 取，不随仓库发布；布局检查需要
 `pahole`。
 
-2026-10-29 实测结果：
+2026-10-31（r5，`out-8059`）实测结果：
 
 - 7298 个导出符号，缺失 0，CRC 差异 0
 - vendor_boot 355 个模块、vendor_dlkm 315 个模块，失败 0
@@ -79,7 +83,8 @@ boot patch level 由 TEE 维护（2026-02-01），与这个头字段无关；保
 ## 行为测试
 
 设备上（root）的测试二进制和整机检查脚本是维护者的本机工具，不随仓库发布。
-2026-10-29 的记录：
+NTSync/futex/epoll/CFS 的记录来自 2026-10-30 的 r4；2026-10-31 的 r5 做了开机、
+门禁和 zram/BBR/NTSync 节点检查，没有重跑这些 selftests。
 
 ```sh
 sh /data/local/tmp/verify_yudi_kernel.sh
@@ -145,5 +150,6 @@ per-node 的 kcompressd 线程，压缩和写回不再占用回收线程。
 - 内核默认保持 stock：`cubic`、BFQ/cpq、zram `lz4`、KSM 关闭、ADIOS 不作为默认。
   这些由 `yudi-tweaks` 模块在开机后调整。
 - 没有开启 `CONFIG_DEBUG_INFO_BTF`，CO-RE eBPF 程序不能用。
-- 安全基线是 5.10.272；5.10.273 与 ACK 10 月的安全提交尚未合并，差距见
-  [ecosystem-survey.md](ecosystem-survey.md)。
+- 基线是 ACK `8059ae2`（Linux 5.10.272）；ACK 还没合入 Linux stable 5.10.273，
+  安全缺口见 [ecosystem-survey.md](ecosystem-survey.md)。ACK 10 月的 ASB 修复
+  旧基线里已经通过其他提交合入，升到 8059ae2 没有新增安全修复。
