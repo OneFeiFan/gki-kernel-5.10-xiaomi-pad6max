@@ -4,7 +4,7 @@
 按 `series` 顺序应用后得到的内核源码树（不含本目录）：
 
 ```
-d88719b598c8a93916db0443f1b0f46c769b53ac
+4fa856c968d0bcdfa3643df019e2464adede7f08
 ```
 
 ## 应用
@@ -56,6 +56,7 @@ while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series"
 | 23 | `08-power/0023-wq-power-efficient-default.patch` | 默认启用 power-efficient unbound workqueues（灰度实验） |
 | 24 | `05-storage/0024-zram-writeback-extm-probe.patch` | 打开 zram writeback，作为小米 ExtM 的 A 探针 |
 | 25 | `09-lib/0025-zstd-1.5.7.patch` | zstd 升级到 1.5.7；lib/zstd 换成 common/compress/decompress 布局，crypto/f2fs/btrfs/squashfs/incfs/pstore/unzstd 切到新 API；新增 ZSTD_COMMON |
+| 26 | `03-memory/0026-kcompressd.patch` | Kcompressd：kswapd 把匿名 zram 页交给 per-node 线程异步压缩；状态放独立数组，`pglist_data` 不动 |
 
 ## 与上一版 15 个补丁的关系
 
@@ -64,7 +65,8 @@ while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series"
 - 原来的 zram 合并补丁（16675 行、48 个文件）拆成三段：0012 只动 lib/lz4 和调用者，0013 加编解码器，0014 才接 zram、黑名单和配置。三段之间按文件切开，没有重复改同一文件。
 - BBRv3 的合并补丁（3542 行）拆成四段：0015 是 BBRv3 依赖的 TCP 基建，0016 是 PLB，0017 是 BBRv3 主体，0018 只改配置。`include/net/tcp.h` 里 PLB 声明和内嵌 `struct bbr3` 的同一段按行切开，PLB 在前、BBRv3 在后。
 - 拆分只改补丁边界，zstd 补丁之前的源码树仍是 `b979f12…`。
-- 0025 把 lib/zstd 从 1.4.10 升级到 1.5.7（来源 ztc1997 的 5.10 GKI 树），调用者切到小写 `zstd_*` API；最终的源码树因此变为 `d88719b…`。zstd 符号不在 KMI 白名单、未导出，`vmlinux.symvers` 仍是 7298 个符号、CRC 差异 0。
+- 0025 把 lib/zstd 从 1.4.10 升级到 1.5.7（来源 ztc1997 的 5.10 GKI 树），调用者切到小写 `zstd_*` API；这一步后的源码树是 `d88719b…`。zstd 符号不在 KMI 白名单、未导出，`vmlinux.symvers` 仍是 7298 个符号、CRC 差异 0。
+- 0026 加入 Kcompressd（来源 ztc1997/Pzqqt），异步压缩状态放在 `include/linux/kcompressd.h` 的独立数组里，`pglist_data` 和 mmzone.h 都不动；最终源码树变为 `4fa856c…`，`vmlinux.symvers` 仍是 7298 个符号、CRC 差异 0。已在 r4 实机验证（10GB 匿名内存压力下 kcompressd CPU 明显上升，无 OOM/panic）。
 - 0023 只改配置，默认启用 `WQ_POWER_EFFICIENT_DEFAULT`，不涉及导出布局，便于按配置回退。
 - 0024 只改配置，打开 `CONFIG_ZRAM_WRITEBACK`，作为 ExtM 的 A 探针；详见 `docs/ExtM-research.md`。
 - 0014 的模块黑名单修复：命令行 `module_blacklist=` 恢复返回 `-EPERM`，内建驱动影子跳过单独返回 0 并打 info 日志。

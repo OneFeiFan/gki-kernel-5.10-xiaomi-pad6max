@@ -114,6 +114,18 @@ squashfs、incfs、pstore、unzstd）切到小写 `zstd_*` API。
 - `vmlinux.symvers` 仍是 7298 个符号、CRC 差异 0；zstd 符号不在 KMI 白名单，未导出
 - 5.10 的 EROFS 不支持 zstd，收益只体现在 zram、f2fs、btrfs 和 initramfs 解压
 
+## Kcompressd
+
+加入 Kcompressd（来源 ztc1997/Pzqqt）：kswapd 把要写到 zram 的匿名页交给
+per-node 的 kcompressd 线程，压缩和写回不再占用回收线程。
+
+- 状态放在 `include/linux/kcompressd.h` 的 `kcompress_data[]`，`pglist_data`
+  和 `mmzone.h` 都不动，KMI 不变
+- 只对 `SWP_SYNCHRONOUS_IO`（zram）且由 kswapd 发起的匿名页写回生效
+- 2026-10-30 实机（r4）：ksu 421 个模块、noroot 419 个；10GB 匿名内存压力下
+  `pswpout` 增加约 238 万页，kcompressd CPU 90→449 ticks、kswapd 149→580，
+  无 OOM/panic
+
 ## 灰度与探针
 
 - `CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y`（0023）：默认启用 power-efficient
@@ -127,6 +139,8 @@ squashfs、incfs、pstore、unzstd）切到小写 `zstd_*` API。
 
 - `tcp_plb_enabled=0`：PLB 面向数据中心 IPv6 多路径，手机网络没有收益。
 - `net_cls` 已启用但未配置：没有默认 classid，需要按容器分流时再写 tc/nft 规则。
+- 懒惰 RCU：5.10 没有这个特性；ztc 的回移也受 `rcu_expedited=1` 限制
+  （该参数来自 vendor_boot，不在我们改的 boot.img 里），暂不做。
 - `FHANDLE` 已启用：容器里可跑 systemd，但不要给容器 `CAP_DAC_READ_SEARCH`。
 - 内核默认保持 stock：`cubic`、BFQ/cpq、zram `lz4`、KSM 关闭、ADIOS 不作为默认。
   这些由 `yudi-tweaks` 模块在开机后调整。
