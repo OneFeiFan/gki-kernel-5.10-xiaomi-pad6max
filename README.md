@@ -96,7 +96,7 @@ while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series"
 
 | 模块 | 说明 |
 | --- | --- |
-| `yudi-tweaks` | 运行时开关和状态页（BBRv3、le9uo、zram、KSM、ADIOS、DAMON） |
+| `yudi-tweaks` | 运行时开关和状态页（BBRv3、le9uo、zram、KSM、ADIOS、DAMON、cpuidle governor） |
 | `ntsync` | 按 `/sys/class/misc/ntsync/dev` 创建 `/dev/ntsync` |
 
 ## 验证

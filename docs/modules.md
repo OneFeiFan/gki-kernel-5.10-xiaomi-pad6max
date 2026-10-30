@@ -5,7 +5,7 @@
 
 | 模块 | 版本 | 作用 |
 | --- | --- | --- |
-| `yudi-tweaks` | 1.5 | 运行时开关和状态页，默认值见模块仓库 |
+| `yudi-tweaks` | 1.6 | 运行时开关和状态页（含 cpuidle governor），默认值见模块仓库 |
 | `ntsync` | 1.1 | 按 `/sys/class/misc/ntsync/dev` 创建 `/dev/ntsync` |
 
 内核侧只提供能力：CFS 带宽供 Droidspaces 限制 CPU，NTSync 提供 misc 设备。
