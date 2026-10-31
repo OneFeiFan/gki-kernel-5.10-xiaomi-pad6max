@@ -145,14 +145,19 @@ per-node 的 kcompressd 线程，压缩和写回不再占用回收线程。
   `mfz_compr_data_size` 为 2,871,990 字节；进程退出后回到约 0
 - `mfz_enable=0`、`mfz_disk_quota=524288`，默认由 ROM 的 PerfInit 决定是否启用
 
-冻结器的现状（2026-10-31 实测，测试后已恢复）：本 ROM 的 cgroup2 只绑了 `pids`（因果待确认：cgroup v2 的冻结是内核核心功能、不需要绑定控制器，"只绑了 pids"本身是正常的；关键要看应用进程是否位于 `/sys/fs/cgroup` 的 `uid_*/pid_*` 组里），
-而 `cgroups.json` 把 freezer 声明在 cgroup2（文件 `cgroup.freeze`），system_server
-初始化失败后记录 `Freezer disabled`，每次开机把 `cached_apps_freezer` 改回
-`disabled`，`am freeze` 触发 `CachedAppOptimizer` 空指针。cgroup v1 freezer 可以
-手动挂载 `/sys/fs/cgroup/freezer` 并正常冻结（tick 测试冻结 10 秒无输出，解冻恢复）；
-第三方 v1 冻结不会把进程搬进 `freeze-app`，所以 mfz 不会参与。Millet 的
-`persist.sys.millet.cgroup=true` 会 tmpfs 覆盖 `/sys/fs/cgroup`，与 Android 16 的
-pids 布局冲突，运行中开启会导致系统服务崩溃，不要直接开。
+冻结器现状（2026-10-31 实测）：内核的 v1 freezer 和 v2 冻结都可用。进程都在 cgroup v2
+的分组里（system_server 在 `/system/uid_1000/pid_*`，应用在 `/apps/uid_*/pid_*`）；v2 只
+列出 pids 控制器是正常的（cpu、cpuset、memory、blkio 挂在 v1，其余是 v1 专用控制器），
+v2 冻结是内核核心功能，不需要控制器。新建组写 `cgroup.freeze` 实测 `cgroup.events` 显示
+`frozen 1`，解冻后 `frozen 0`。系统 API 冻结器的 `Freezer disabled` 来自 ROM 默认设置：
+`cached_apps_freezer` 为 `disabled`（`dumpsys settings`：`pkg:android value:disabled
+default:disabled defaultSystemSet:true`），`use_freezer` 设备配置为空，日志里没有
+`Checking cgroup freezer`，系统没有走到检测内核能力那一步；澎湃 OS 用自己的 Millet
+冻结链路。v1 freezer ROM 不挂载，第三方墓碑在自己的挂载命名空间里挂（如
+`/sys/fs/cgroup/freezer/perf/frozen`）。第三方冻结（v1 或 v2）不会把进程搬进
+`/dev/memcg/freeze-app`，所以 mfz 只在小米自己的冻结链路下生效。Millet 的
+`persist.sys.millet.cgroup=true` 会 tmpfs 覆盖 `/sys/fs/cgroup`，与 Android 16 的分组
+布局冲突，运行中开启会导致系统服务崩溃，不要直接开。
 
 ## cpuidle governor（TEO）
 
@@ -189,9 +194,9 @@ TEO 的深睡占比略高，没有异常；功耗和唤醒延迟没有测，默�
 - `FHANDLE` 已启用：容器里可跑 systemd，但不要给容器 `CAP_DAC_READ_SEARCH`。
 - 内核默认保持 stock：`cubic`、BFQ/cpq、zram `lz4`、KSM 关闭、ADIOS 不作为默认。
   这些由 `yudi-tweaks` 模块在开机后调整。
-- 冻结器：本 ROM 的 API 冻结器不可用（`cgroups.json` 把 freezer 放在 cgroup2，
-  内核 cgroup2 只有 pids）；手动/第三方 v1 freezer 可用，但不会把进程搬进
-  `freeze-app`，mfz 只在小米自己的冻结链路下生效。
+- 冻结器：内核 v1 freezer 与 v2 冻结都可用（v2 实测 `frozen 1/0`）；系统 API 冻结器被 ROM 默认设置
+  `cached_apps_freezer=disabled` 关闭（澎湃 OS 用 Millet）；第三方冻结不会把进程搬进 `freeze-app`，
+  mfz 只在小米自己的冻结链路下生效。
 - 没有开启 `CONFIG_DEBUG_INFO_BTF`，CO-RE eBPF 程序不能用。
 - 基线是 ACK `8059ae2`（Linux 5.10.272）；ACK 还没合入 Linux stable 5.10.273，
   安全缺口见 [ecosystem-survey.md](ecosystem-survey.md)。ACK 10 月的 ASB 修复

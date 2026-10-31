@@ -51,14 +51,19 @@
   `mfz_enable=0`、`mfz_disk_quota=524288`，由 ROM 的 PerfInit 决定是否启用。
 - mfz 计数实测：测试进程在 `freeze-app` 换出 512MB 后 `mfz_compr_data_size` 为
   2,871,990 字节；进程退出后回到约 0。按 memcg 打标和计数路径正常。
-- 冻结侧（2026-10-31 实测后已恢复原状）：本 ROM 的 cgroup2 只绑了 `pids`（因果待确认：cgroup v2 的冻结是内核核心功能、不需要绑定控制器，"只绑了 pids"本身是正常的；关键要看应用进程是否位于 `/sys/fs/cgroup` 的 `uid_*/pid_*` 组里），而
-  `cgroups.json` 把 freezer 声明在 cgroup2（`cgroup.freeze`），system_server
-  初始化失败，日志 `Freezer disabled`，每次开机把 `cached_apps_freezer` 改回
-  `disabled`，`am freeze` 空指针。cgroup v1 freezer 可以手动挂载
-  `/sys/fs/cgroup/freezer` 并工作（tick 测试冻结 10 秒无输出，解冻恢复），但第三方
-  v1 冻结不会把进程搬进 `freeze-app`，mfz 不参与。Millet 的
-  `persist.sys.millet.cgroup=true` 会 tmpfs 覆盖 `/sys/fs/cgroup`，与 Android 16 的
-  pids 布局冲突，运行中开启会导致系统服务崩溃，不要直接开。
+- 冻结器现状（2026-10-31 实测）：内核的 v1 freezer 和 v2 冻结都可用。进程都在 cgroup v2
+  的分组里（system_server 在 `/system/uid_1000/pid_*`，应用在 `/apps/uid_*/pid_*`）；v2 只
+  列出 pids 控制器是正常的（cpu、cpuset、memory、blkio 挂在 v1，其余是 v1 专用控制器），
+  v2 冻结是内核核心功能，不需要控制器。新建组写 `cgroup.freeze` 实测 `cgroup.events` 显示
+  `frozen 1`，解冻后 `frozen 0`。系统 API 冻结器的 `Freezer disabled` 来自 ROM 默认设置：
+  `cached_apps_freezer` 为 `disabled`（`dumpsys settings`：`pkg:android value:disabled
+  default:disabled defaultSystemSet:true`），`use_freezer` 设备配置为空，日志里没有
+  `Checking cgroup freezer`，系统没有走到检测内核能力那一步；澎湃 OS 用自己的 Millet
+  冻结链路。v1 freezer ROM 不挂载，第三方墓碑在自己的挂载命名空间里挂（如
+  `/sys/fs/cgroup/freezer/perf/frozen`）。第三方冻结（v1 或 v2）不会把进程搬进
+  `/dev/memcg/freeze-app`，所以 mfz 只在小米自己的冻结链路下生效。Millet 的
+  `persist.sys.millet.cgroup=true` 会 tmpfs 覆盖 `/sys/fs/cgroup`，与 Android 16 的分组
+  布局冲突，运行中开启会导致系统服务崩溃，不要直接开。
 - 未保留任何测试改动：模块 `post-fs-data.sh` 已还原，freezer 挂载和
   `/data/local/tmp` 测试程序已删除。
 
