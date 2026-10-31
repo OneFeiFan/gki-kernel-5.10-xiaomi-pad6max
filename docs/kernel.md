@@ -7,8 +7,9 @@
 缓存键里，`/proc/config.gz` 可能还是上一次的配置数据，看起来像配置没生效。
 
 当前基线是 ACK `android12-5.10-lts` 的 `8059ae2`（2026-10-24，Linux 5.10.272）；
-26 个补丁应用后的源码树是 `146fd5e7b5`。`8059ae2` 相对旧基线 `a1eed2e9c` 的净差异
-只有 `net/can/bcm.c` 的一处回退；ACK 10 月的 ASB 修复旧基线里已经通过其他提交合入。
+通用 26 个 + 小米 3 个，共 29 个补丁应用后的源码树是 `2afd8cc8`（通用 26 个的树是
+`862d9162`）。`8059ae2` 相对旧基线 `a1eed2e9c` 的净差异只有 `net/can/bcm.c` 的一处
+回退；ACK 10 月的 ASB 修复旧基线里已经通过其他提交合入。
 
 ## 门禁
 
@@ -27,7 +28,7 @@ python3 tools/abi_layout_check.py "$OUT/dist/vmlinux"
 从设备的 `vendor_boot` 和 `vendor_dlkm` 取，不随仓库发布；布局检查需要
 `pahole`。
 
-2026-10-31（r5，`out-8059`）实测结果：
+2026-10-31（r6，`out-xiaomi`，29 补丁）实测结果，与 r5 相同：
 
 - 7298 个导出符号，缺失 0，CRC 差异 0
 - vendor_boot 355 个模块、vendor_dlkm 315 个模块，失败 0
@@ -83,8 +84,8 @@ boot patch level 由 TEE 维护（2026-02-01），与这个头字段无关；保
 ## 行为测试
 
 设备上（root）的测试二进制和整机检查脚本是维护者的本机工具，不随仓库发布。
-NTSync/futex/epoll/CFS 的记录来自 2026-10-30 的 r4；2026-10-31 的 r5 做了开机、
-门禁和 zram/BBR/NTSync 节点检查，没有重跑这些 selftests。
+NTSync/futex/epoll/CFS 的记录来自 2026-10-30 的 r4；2026-10-31 的 r6 做了开机、
+门禁和 ExtM/mfz 节点检查，没有重跑这些 selftests。
 
 ```sh
 sh /data/local/tmp/verify_yudi_kernel.sh
@@ -131,6 +132,28 @@ per-node 的 kcompressd 线程，压缩和写回不再占用回收线程。
   `pswpout` 增加约 238 万页，kcompressd CPU 90→449 ticks、kswapd 149→580，
   无 OOM/panic
 
+## ExtM 与内存冻结（mfz）
+
+0027 把 zram 换成小米 ExtM 写回实现，0028 加 mfz 策略，0029 修复 0028 的 memcg 文件
+注册位置。r6（29 补丁）实机结果：
+
+- zram 内建，`comp_algorithm` 为 `[lz4kd]`，`backing_dev` 为 `/dev/block/dm-48`
+- `/sys/block/zram0` 出现 `mfz_enable`、`mfz_disk_quota`、`mfz_compr_data_size`、
+  `mfz_idle_stat`、`bd_stat`；`freeze-app/memory.anno_writeback_enable=2`（init.rc
+  写 1，驱动按 5.10 接口存 2）
+- 测试进程放进 `freeze-app` 内存组，`MADV_PAGEOUT` 换出 512MB 后
+  `mfz_compr_data_size` 为 2,871,990 字节；进程退出后回到约 0
+- `mfz_enable=0`、`mfz_disk_quota=524288`，默认由 ROM 的 PerfInit 决定是否启用
+
+冻结器的现状（2026-10-31 实测，测试后已恢复）：本 ROM 的 cgroup2 只绑了 `pids`，
+而 `cgroups.json` 把 freezer 声明在 cgroup2（文件 `cgroup.freeze`），system_server
+初始化失败后记录 `Freezer disabled`，每次开机把 `cached_apps_freezer` 改回
+`disabled`，`am freeze` 触发 `CachedAppOptimizer` 空指针。cgroup v1 freezer 可以
+手动挂载 `/sys/fs/cgroup/freezer` 并正常冻结（tick 测试冻结 10 秒无输出，解冻恢复）；
+第三方 v1 冻结不会把进程搬进 `freeze-app`，所以 mfz 不会参与。Millet 的
+`persist.sys.millet.cgroup=true` 会 tmpfs 覆盖 `/sys/fs/cgroup`，与 Android 16 的
+pids 布局冲突，运行中开启会导致系统服务崩溃，不要直接开。
+
 ## cpuidle governor（TEO）
 
 ACK 的 5.10 基线已经带 TEO（`CONFIG_CPU_IDLE_GOV_TEO=y`），设备上
@@ -154,9 +177,8 @@ TEO 的深睡占比略高，没有异常；功耗和唤醒延迟没有测，默�
 - `CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y`（0023）：默认启用 power-efficient
   unbound workqueues。已确认 `/sys/module/workqueue/parameters/power_efficient=Y`；
   真实功耗 A/B 还没做，去掉补丁即可回退。
-- `CONFIG_ZRAM_WRITEBACK=y`（0024）：小米 ExtM 的 A 探针。打开后 zram 会出现
-  `backing_dev`、`writeback*`、`bd_stat` 等节点；ExtM 是否真正启动取决于
-  PerfInit 的启动门槛，见 [ExtM-research.md](ExtM-research.md)。
+- zram 写回（0017）、小米 ExtM（0027）和 mfz（0028/0029）已经落地，不再是探针；
+  ExtM 的启用门槛在 PerfInit，见 [ExtM-research.md](ExtM-research.md)。
 
 ## 已知限制
 
@@ -167,6 +189,9 @@ TEO 的深睡占比略高，没有异常；功耗和唤醒延迟没有测，默�
 - `FHANDLE` 已启用：容器里可跑 systemd，但不要给容器 `CAP_DAC_READ_SEARCH`。
 - 内核默认保持 stock：`cubic`、BFQ/cpq、zram `lz4`、KSM 关闭、ADIOS 不作为默认。
   这些由 `yudi-tweaks` 模块在开机后调整。
+- 冻结器：本 ROM 的 API 冻结器不可用（`cgroups.json` 把 freezer 放在 cgroup2，
+  内核 cgroup2 只有 pids）；手动/第三方 v1 freezer 可用，但不会把进程搬进
+  `freeze-app`，mfz 只在小米自己的冻结链路下生效。
 - 没有开启 `CONFIG_DEBUG_INFO_BTF`，CO-RE eBPF 程序不能用。
 - 基线是 ACK `8059ae2`（Linux 5.10.272）；ACK 还没合入 Linux stable 5.10.273，
   安全缺口见 [ecosystem-survey.md](ecosystem-survey.md)。ACK 10 月的 ASB 修复

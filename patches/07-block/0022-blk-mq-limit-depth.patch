@@ -1,19 +1,25 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 09ff311f4d10ba51a1ff301346fcbbf9d98b2705 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] blk-mq: map ctx and hctx before limit_depth
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Move the ctx/hctx mapping before the elevator limit_depth callback.
 ADIOS uses limit_depth and needs data->ctx/data->hctx to be valid there.
 
-Origin: firelzrd/adios v3.3.0r2 (blk-mq change), upstream blk-mq fix
+Origin: torvalds/linux 6259151c04d4（block: Call .limit_depth() after .hctx has been set），按 5.10 的请求分配路径适配
 Upstream-Status: Backport
 KABI: none
 Depends-On: none
 Tested-On: yudi 5.10.272 (ADIOS boot test)
 ---
+ block/blk-mq.c | 11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
 diff --git a/block/blk-mq.c b/block/blk-mq.c
-index 96ede8f..75908b9 100644
+index 96ede8fa0..75908b931 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
 @@ -365,6 +365,10 @@ static struct request *__blk_mq_alloc_request(struct blk_mq_alloc_data *data)
@@ -41,3 +47,6 @@ index 96ede8f..75908b9 100644
  		blk_mq_tag_busy(data->hctx);
  
  	/*
+-- 
+2.43.0
+

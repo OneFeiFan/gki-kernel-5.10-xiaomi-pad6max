@@ -1,7 +1,10 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From c98247d7025fb6e862bb230973f7c43eae7ad9f7 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] lz4: update to the ARMv8-accelerated implementation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Backport the newer LZ4 library with the ARM64 NEON kernels, and adapt
 the crypto wrappers plus the f2fs and incfs callers to the new API.
@@ -11,12 +14,42 @@ codecs and the zram glue follow in the next two patches.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 
-Origin: SukiSU_patch other/zram/zram_patch/5.10/lz4kd.patch + 本地 Droidspaces lz4/NEON 源码（apply_zram.sh 组装）（本补丁：lib/lz4 与调用者）
+Origin: superturtlee/kernel-workshop-docker tools/NGBPS/mod_repo/6.12/lz4zstd/patch.diff 的 lib/lz4 部分（LZ4 1.10 + lz4armv8），按 5.10 适配 lz4hc 宏与 crypto/f2fs/incfs 调用点
 Upstream-Status: Backport
 KABI: none
 Depends-On: none
 Tested-On: yudi 5.10.272（zram lz4kd 启动与读写）, 2026-10-29
 ---
+ crypto/lz4.c                |    8 +-
+ crypto/lz4hc.c              |    8 +-
+ fs/f2fs/compress.c          |    7 +-
+ fs/incfs/data_mgmt.c        |    7 +-
+ include/linux/lz4.h         |  655 +------
+ lib/lz4/Makefile            |   10 +-
+ lib/lz4/lz4.c               | 3484 +++++++++++++++++++++++++++++++++++
+ lib/lz4/lz4.h               |  984 ++++++++++
+ lib/lz4/lz4_compress.c      |  940 ----------
+ lib/lz4/lz4_decompress.c    |  720 --------
+ lib/lz4/lz4armv8/lz4accel.c |   48 +
+ lib/lz4/lz4armv8/lz4accel.h |   56 +
+ lib/lz4/lz4armv8/lz4armv8.S |  312 ++++
+ lib/lz4/lz4defs.h           |  245 ---
+ lib/lz4/lz4hc.c             | 2809 ++++++++++++++++++++++++++++
+ lib/lz4/lz4hc.h             |  451 +++++
+ lib/lz4/lz4hc_compress.c    |  768 --------
+ 17 files changed, 8187 insertions(+), 3325 deletions(-)
+ create mode 100644 lib/lz4/lz4.c
+ create mode 100644 lib/lz4/lz4.h
+ delete mode 100644 lib/lz4/lz4_compress.c
+ delete mode 100644 lib/lz4/lz4_decompress.c
+ create mode 100644 lib/lz4/lz4armv8/lz4accel.c
+ create mode 100644 lib/lz4/lz4armv8/lz4accel.h
+ create mode 100644 lib/lz4/lz4armv8/lz4armv8.S
+ delete mode 100644 lib/lz4/lz4defs.h
+ create mode 100644 lib/lz4/lz4hc.c
+ create mode 100644 lib/lz4/lz4hc.h
+ delete mode 100644 lib/lz4/lz4hc_compress.c
+
 diff --git a/crypto/lz4.c b/crypto/lz4.c
 index 0606f8862..650c2cefc 100644
 --- a/crypto/lz4.c
@@ -11658,3 +11691,6 @@ index e7ac8694b..000000000
 -
 -MODULE_LICENSE("Dual BSD/GPL");
 -MODULE_DESCRIPTION("LZ4 HC compressor");
+-- 
+2.43.0
+

@@ -1,4 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 3a57e6fa90845f25d2a8b26ea0cf4ac0cd16483b Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Fri, 30 Oct 2026 00:10:22 +0800
 Subject: [PATCH] lib: zstd: upgrade to 1.5.7
@@ -19,10 +19,10 @@ The ZSTD symbols are not exported in this build: they are not in the
 KMI allowlist and CONFIG_TRIM_UNUSED_KSYMS is on, so vmlinux.symvers
 stays at 7298 symbols with zero CRC differences.
 
-Origin: ztc1997/android_gki_kernel_5.10_common 034573f5935b (v1.5.7) + 2db03079c91d (compile fix)
+Origin: ztc1997/android_gki_kernel_5.10_common 的整串 zstd 回移：4e9874343c55、d83083373fe8、9c4700692567、2312ac6d38b9、3335cadb1226、0903afbc37cc、6f4bbf8390e8、0f068a5a2f91、f07579a9cc72、166b4f8e393f、03ad46f97d29、d7dc4f4f1ff5、a1bc56cbb7c8、034573f5935b、2db03079c91d（lib/zstd 与 ztc 树逐字一致；未带 ztc 的 crypto 压缩级别参数）
 Upstream-Status: Backport
 KABI: none（zstd 符号不在 KMI 白名单，未导出）
-Depends-On: none
+Depends-On: 0015 lz4k/lz4kd codecs（lib/Kconfig 上下文）
 Tested-On: yudi 5.10.272（2026-10-30，r3 ksu）：开机正常、422 个模块无 CRC 不符、zram 切到 zstd 后 32MB 读写 md5 一致
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
@@ -50364,5 +50364,5 @@ index 55e1b4cba..000000000
 -
 -#endif /* ZSTD_OPT_H_91842398743 */
 -- 
-2.34.1
+2.43.0
 

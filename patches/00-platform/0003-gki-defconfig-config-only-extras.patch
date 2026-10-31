@@ -1,0 +1,58 @@
+From 784dd8bf75d761095171c16769048cc050adbeb7 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Thu, 29 Oct 2026 01:52:55 +0800
+Subject: [PATCH] gki_defconfig: enable config-only extras
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+KSM, tmpfs xattrs/POSIX ACLs and Btrfs need no code changes and leave
+the KMI as is.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+Origin: 本地配置
+Upstream-Status: Not-Applicable
+KABI: none
+Depends-On: none
+Tested-On: yudi 5.10.272, 2026-10-29
+---
+ arch/arm64/configs/gki_defconfig | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 1144c0040..d9df33fff 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -119,6 +119,8 @@ CONFIG_MEMORY_HOTREMOVE=y
+ CONFIG_DEFAULT_MMAP_MIN_ADDR=32768
+ CONFIG_TRANSPARENT_HUGEPAGE=y
+ CONFIG_TRANSPARENT_HUGEPAGE_MADVISE=y
++# yudi: KSM
++CONFIG_KSM=y
+ CONFIG_CLEANCACHE=y
+ CONFIG_CMA=y
+ CONFIG_CMA_DEBUGFS=y
+@@ -573,6 +575,9 @@ CONFIG_EXT4_FS=y
+ CONFIG_EXT4_FS_POSIX_ACL=y
+ CONFIG_EXT4_FS_SECURITY=y
+ CONFIG_F2FS_FS=y
++# yudi: Btrfs
++CONFIG_BTRFS_FS=y
++CONFIG_BTRFS_FS_POSIX_ACL=y
+ CONFIG_F2FS_FS_SECURITY=y
+ CONFIG_F2FS_FS_COMPRESSION=y
+ CONFIG_FS_ENCRYPTION=y
+@@ -590,6 +595,9 @@ CONFIG_MSDOS_FS=y
+ CONFIG_VFAT_FS=y
+ CONFIG_EXFAT_FS=y
+ CONFIG_TMPFS=y
++# yudi: tmpfs xattrs and POSIX ACLs
++CONFIG_TMPFS_XATTR=y
++CONFIG_TMPFS_POSIX_ACL=y
+ # CONFIG_EFIVAR_FS is not set
+ CONFIG_PSTORE=y
+ CONFIG_PSTORE_CONSOLE=y
+-- 
+2.43.0
+

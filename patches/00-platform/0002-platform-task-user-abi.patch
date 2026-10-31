@@ -1,9 +1,12 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From e452ba315ca164bb2dc423b686b2a6caeb7a6d7f Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:55 +0800
 Subject: [PATCH] platform: keep task_struct and user_struct ABI stock
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
-Move sysvsem, sysvshm and mq_bytes into the Android KABI reserves so CONFIG_SYSVIPC and CONFIG_POSIX_MQUEUE can be enabled without changing the exported layout. Skip build.config's strict defconfig check for the customized gki_defconfig.
+Move sysvsem, sysvshm and mq_bytes into the Android KABI reserves so CONFIG_SYSVIPC and CONFIG_POSIX_MQUEUE can be enabled without changing the exported layout.
 
 Enable the options that rely on these placements in gki_defconfig:
 PID_NS, SYSVIPC, POSIX_MQUEUE, IPC_NS and USER_NS, plus DEVTMPFS for
@@ -11,44 +14,38 @@ Droidspaces.
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 
-Origin: superturtlee/kernel-workshop-docker patch/fulldocker/superkernel.diff（高版本 KABI 方案，本地适配；sysv_shm 部分为本地补充）
+Origin: Goldzxcbug/Droidspaces_Kernel_patch GKI/5.10/GKI-5.10-sysvipc_kabi_6_7_8.patch（task_struct）+ GKI_5.10_posix.patch（user_struct）
 Upstream-Status: Not-Applicable
-KABI: task_struct ANDROID_KABI_RESERVE(3)(4)(5)；_ANDROID_KABI_REPLACE 使用 RESERVE(7)(8) 承载 sysv_shm
+KABI: task_struct ANDROID_KABI_USE(6) 承载 sysvsem，_ANDROID_KABI_REPLACE(RESERVE(7)+RESERVE(8)) 承载 sysvshm；user_struct ANDROID_KABI_USE(1) 承载 mq_bytes
 Depends-On: none
 Tested-On: yudi 5.10.272, 2026-10-29
 ---
- arch/arm64/configs/gki_defconfig | 10 +++++++++-
+ arch/arm64/configs/gki_defconfig |  8 +++++++-
  include/linux/sched.h            | 10 ++++++++--
  include/linux/sched/user.h       |  8 +++++++-
- 3 files changed, 24 insertions(+), 4 deletions(-)
+ 3 files changed, 22 insertions(+), 4 deletions(-)
 
 diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index f820554..a5d3174 100644
+index f8205546c..1144c0040 100644
 --- a/arch/arm64/configs/gki_defconfig
 +++ b/arch/arm64/configs/gki_defconfig
-@@ -25,7 +25,7 @@ CONFIG_CPUSETS=y
+@@ -25,7 +25,13 @@ CONFIG_CPUSETS=y
  CONFIG_CGROUP_CPUACCT=y
  CONFIG_CGROUP_BPF=y
  CONFIG_NAMESPACES=y
 -# CONFIG_PID_NS is not set
 +CONFIG_PID_NS=y
- CONFIG_RT_SOFTINT_OPTIMIZATION=y
- # CONFIG_RD_BZIP2 is not set
- # CONFIG_RD_LZMA is not set
-@@ -699,3 +699,11 @@ CONFIG_TRACEFS_DISABLE_AUTOMOUNT=y
- CONFIG_HIST_TRIGGERS=y
- CONFIG_FUNCTION_ERROR_INJECTION=y
- # CONFIG_RUNTIME_TESTING_MENU is not set
++# yudi: SysV IPC, POSIX mqueue and namespaces (KABI-safe, see platform-task-user-abi)
 +CONFIG_SYSVIPC=y
 +CONFIG_POSIX_MQUEUE=y
 +CONFIG_IPC_NS=y
 +CONFIG_USER_NS=y
 +CONFIG_DEVTMPFS=y
-+# Phase 4: bridge netfilter + IPv6 NAT.  Ebtables and VLAN filtering are
-+# Phase 5: IPVS + SCTP.  IP_VS_TWOS does not exist in 5.10 (added later).
-+# Phase 6: tunnels / virtual NICs / tc.
+ CONFIG_RT_SOFTINT_OPTIMIZATION=y
+ # CONFIG_RD_BZIP2 is not set
+ # CONFIG_RD_LZMA is not set
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index b26b61a..40a1681 100644
+index b26b61a9b..40a16815c 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
 @@ -968,8 +968,8 @@ struct task_struct {
@@ -79,7 +76,7 @@ index b26b61a..40a1681 100644
  	/*
  	 * New fields for task_struct should be added above here, so that
 diff --git a/include/linux/sched/user.h b/include/linux/sched/user.h
-index 6d63a52..b96fe70 100644
+index 6d63a5260..b96fe706b 100644
 --- a/include/linux/sched/user.h
 +++ b/include/linux/sched/user.h
 @@ -23,7 +23,7 @@ struct user_struct {
@@ -107,3 +104,6 @@ index 6d63a52..b96fe70 100644
  };
  
  extern int uids_sysfs_init(void);
+-- 
+2.43.0
+

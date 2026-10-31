@@ -1,22 +1,96 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 78da8584f2ca8fe08149c2c4634c8529ead30b9f Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] lib: add the LZ4K and LZ4KD codecs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Add the LZ4K, LZ4K-oplus and LZ4KD compression codecs and their crypto
 API wrappers.
 
-The codecs do not depend on lib/lz4; the next patch wires them into
-zram and enables them in gki_defconfig.
+The codecs do not depend on lib/lz4. Enable them in gki_defconfig
+together with LZ4HC and 842 as built-in crypto algorithms, so any zram
+- the built-in one (0016) or a vendor module - can select them by
+name through the crypto API (5.10 zram accepts any algorithm known to
+crypto, even if it is not in its own list).
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 
-Origin: SukiSU_patch other/zram/zram_patch/5.10/lz4kd.patch + 本地 Droidspaces lz4/NEON 源码（apply_zram.sh 组装）（本补丁：LZ4K/LZ4K-oplus/LZ4KD 编解码器与 crypto 封装）
+Origin: ShirkNeko/SukiSU_patch other/zram/lz4k 与 other/zram/lz4k_oplus（源码逐字一致；lz4k_oplus 只有注释和模块描述拼写不同）
 Upstream-Status: Not-Applicable
 KABI: none
-Depends-On: none
+Depends-On: none（zram 接线在 0016）
 Tested-On: yudi 5.10.272（zram lz4kd 启动与读写）, 2026-10-29
 ---
+ arch/arm64/configs/gki_defconfig |   6 +
+ crypto/Kconfig                   |  18 +
+ crypto/Makefile                  |   2 +
+ crypto/lz4k.c                    |  95 ++++++
+ crypto/lz4kd.c                   | 136 ++++++++
+ include/linux/lz4k.h             | 383 ++++++++++++++++++++++
+ include/linux/lz4kd.h            | 326 ++++++++++++++++++
+ lib/Kconfig                      |  13 +
+ lib/Makefile                     |   5 +
+ lib/lz4k/Makefile                |   2 +
+ lib/lz4k/lz4k_decode.c           | 310 ++++++++++++++++++
+ lib/lz4k/lz4k_encode.c           | 545 +++++++++++++++++++++++++++++++
+ lib/lz4k/lz4k_encode_private.h   | 137 ++++++++
+ lib/lz4k/lz4k_private.h          | 269 +++++++++++++++
+ lib/lz4k_oplus/Kconfig           |   6 +
+ lib/lz4k_oplus/Makefile          |   8 +
+ lib/lz4k_oplus/lz4k.c            |  90 +++++
+ lib/lz4k_oplus/lz4k.h            | 163 +++++++++
+ lib/lz4k_oplus/lz4k_compress.c   | 285 ++++++++++++++++
+ lib/lz4k_oplus/lz4k_decompress.c | 254 ++++++++++++++
+ lib/lz4kd/Makefile               |   3 +
+ lib/lz4kd/lz4kd_decode.c         | 243 ++++++++++++++
+ lib/lz4kd/lz4kd_decode_delta.c   | 225 +++++++++++++
+ lib/lz4kd/lz4kd_encode.c         | 418 ++++++++++++++++++++++++
+ lib/lz4kd/lz4kd_encode_delta.c   | 259 +++++++++++++++
+ lib/lz4kd/lz4kd_encode_private.h | 135 ++++++++
+ lib/lz4kd/lz4kd_private.h        | 304 +++++++++++++++++
+ 27 files changed, 4640 insertions(+)
+ create mode 100644 crypto/lz4k.c
+ create mode 100644 crypto/lz4kd.c
+ create mode 100644 include/linux/lz4k.h
+ create mode 100644 include/linux/lz4kd.h
+ create mode 100644 lib/lz4k/Makefile
+ create mode 100644 lib/lz4k/lz4k_decode.c
+ create mode 100644 lib/lz4k/lz4k_encode.c
+ create mode 100644 lib/lz4k/lz4k_encode_private.h
+ create mode 100644 lib/lz4k/lz4k_private.h
+ create mode 100644 lib/lz4k_oplus/Kconfig
+ create mode 100644 lib/lz4k_oplus/Makefile
+ create mode 100644 lib/lz4k_oplus/lz4k.c
+ create mode 100644 lib/lz4k_oplus/lz4k.h
+ create mode 100644 lib/lz4k_oplus/lz4k_compress.c
+ create mode 100644 lib/lz4k_oplus/lz4k_decompress.c
+ create mode 100644 lib/lz4kd/Makefile
+ create mode 100644 lib/lz4kd/lz4kd_decode.c
+ create mode 100644 lib/lz4kd/lz4kd_decode_delta.c
+ create mode 100644 lib/lz4kd/lz4kd_encode.c
+ create mode 100644 lib/lz4kd/lz4kd_encode_delta.c
+ create mode 100644 lib/lz4kd/lz4kd_encode_private.h
+ create mode 100644 lib/lz4kd/lz4kd_private.h
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 9a569aae7..b4ec5b51a 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -813,6 +813,12 @@ CONFIG_CRYPTO_BLAKE2B=y
+ CONFIG_CRYPTO_MD5=y
+ CONFIG_CRYPTO_DES=y
+ CONFIG_CRYPTO_LZ4=y
++# yudi: compression algorithms for zram (built in, selected by name)
++CONFIG_CRYPTO_LZ4HC=y
++CONFIG_CRYPTO_LZ4K=y
++CONFIG_CRYPTO_LZ4KD=y
++CONFIG_CRYPTO_842=y
++CONFIG_CRYPTO_LZ4K_OPLUS=y
+ CONFIG_CRYPTO_ZSTD=y
+ CONFIG_CRYPTO_ANSI_CPRNG=y
+ CONFIG_CRC8=y
 diff --git a/crypto/Kconfig b/crypto/Kconfig
 index a7b2aa661..fe4826115 100644
 --- a/crypto/Kconfig
@@ -4837,5 +4911,5 @@ index 000000000..63b62f044
 +
 +#endif /* _LZ4KD_PRIVATE_H */
 -- 
-2.34.1
+2.43.0
 

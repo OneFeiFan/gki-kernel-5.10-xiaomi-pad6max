@@ -1,31 +1,42 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From b491fc394441ce7b768ffb1f91569f1c3f04768b Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] block: add the ADIOS I/O scheduler
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Add the ADIOS I/O scheduler. The blk-mq ctx/hctx fix it
 depends on is in the previous patch.
 
-Origin: firelzrd/adios v3.3.0r2
+Origin: firelzrd/adios ADIOS 3.2.0（08bf078 的 linux6.12.44 补丁），适配 5.10 blk-mq 接口并加一处空指针检查
 Upstream-Status: Not-Applicable
 KABI: none
 Depends-On: previous blk-mq patch
 Tested-On: yudi 5.10.272 (ADIOS boot test)
 ---
+ arch/arm64/configs/gki_defconfig |    2 +
+ block/Kconfig.iosched            |    7 +
+ block/Makefile                   |    2 +
+ block/adios.c                    | 2069 ++++++++++++++++++++++++++++++
+ 4 files changed, 2080 insertions(+)
+ create mode 100644 block/adios.c
+
 diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index 9e6e133..99008e4 100644
+index 55c2dc89f..d7e32f369 100644
 --- a/arch/arm64/configs/gki_defconfig
 +++ b/arch/arm64/configs/gki_defconfig
-@@ -886,3 +886,7 @@ CONFIG_TCP_CONG_BBR=y
- 
- # Phase 10.6: BBRv3.
- CONFIG_TCP_CONG_BBR3=y
-+
-+# BBRv3 is available, but the kernel keeps the stock default (cubic).
-+# The runtime module selects bbr3 when requested.
+@@ -121,6 +121,8 @@ CONFIG_BLK_INLINE_ENCRYPTION=y
+ CONFIG_BLK_INLINE_ENCRYPTION_FALLBACK=y
+ CONFIG_IOSCHED_BFQ=y
+ CONFIG_BFQ_GROUP_IOSCHED=y
++# yudi: ADIOS I/O scheduler (default scheduler unchanged)
 +CONFIG_MQ_IOSCHED_ADIOS=y
+ CONFIG_GKI_HACKS_TO_FIX=y
+ # CONFIG_CORE_DUMP_DEFAULT_ELF_HEADERS is not set
+ CONFIG_BINFMT_MISC=y
 diff --git a/block/Kconfig.iosched b/block/Kconfig.iosched
-index 64053d6..886743b 100644
+index 64053d67a..886743bbb 100644
 --- a/block/Kconfig.iosched
 +++ b/block/Kconfig.iosched
 @@ -24,6 +24,13 @@ config MQ_IOSCHED_KYBER
@@ -43,7 +54,7 @@ index 64053d6..886743b 100644
  	tristate "BFQ I/O scheduler"
  	help
 diff --git a/block/Makefile b/block/Makefile
-index b9db5d4..0ee8757 100644
+index b9db5d4ed..0ee8757a3 100644
 --- a/block/Makefile
 +++ b/block/Makefile
 @@ -24,6 +24,8 @@ obj-$(CONFIG_MQ_IOSCHED_DEADLINE)	+= mq-deadline.o
@@ -57,7 +68,7 @@ index b9db5d4..0ee8757 100644
  
 diff --git a/block/adios.c b/block/adios.c
 new file mode 100644
-index 0000000..ddd8fa9
+index 000000000..ddd8fa926
 --- /dev/null
 +++ b/block/adios.c
 @@ -0,0 +1,2069 @@
@@ -2131,3 +2142,6 @@ index 0000000..ddd8fa9
 +MODULE_LICENSE("GPL");
 +MODULE_DESCRIPTION(ADIOS_PROGNAME);
 \ No newline at end of file
+-- 
+2.43.0
+

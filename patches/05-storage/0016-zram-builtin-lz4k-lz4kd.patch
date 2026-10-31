@@ -1,45 +1,56 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 34a22f55448cdca5599536689e011fe99846ff9a Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
-Subject: [PATCH] zram: build in LZ4K/LZ4KD with ARM64 NEON
+Subject: [PATCH] zram: build zram and zsmalloc in with LZ4K/LZ4KD
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
-Wire LZ4K/LZ4KD into zram, allow selecting any compressing backend in
-the zram Kconfig, and enable zram, zsmalloc and the algorithms in
-gki_defconfig.
+Build zram, zsmalloc and LZO into the kernel and wire the LZ4K/LZ4KD
+codecs (enabled by 0015) into zram: add them to the backend list, let
+the default compressor be chosen in Kconfig (CONFIG_ZRAM_DEF_COMP), and
+allow any compressing backend in the zram Kconfig.
 
-Carry the built-in zram/zsmalloc/lzo module blacklist here (as in the
-original combined patch): a module named on the module_blacklist=
-command line returns -EPERM, while a built-in driver shadowing a vendor
-module is skipped with a log line and returns 0. Enable zram, zsmalloc
-and the compression algorithms in gki_defconfig.
+Built-in zram replaces the vendor zram.ko/zsmalloc.ko, so the zram
+driver is ours to maintain; Xiaomi's ExtM is added on top in
+xiaomi/0027. Carry the built-in module blacklist here: a module named on
+the module_blacklist= command line returns -EPERM, while a vendor module
+shadowed by a built-in driver (zram, zsmalloc, lzo/lzo_rle) is skipped
+with a log line and returns 0. Each blacklist entry only exists when the
+matching driver is built in.
 
-Co-Authored-By: Claude Code <noreply@anthropic.com>
-
-Origin: SukiSU_patch other/zram/zram_patch/5.10/lz4kd.patch + 本地 Droidspaces lz4/NEON 源码（apply_zram.sh 组装）（本补丁：zram 接线、内建模块黑名单与 gki_defconfig）
+Origin: ShirkNeko/SukiSU_patch other/zram/zram_patch/5.10/lz4kd.patch + lz4k_oplus.patch（本补丁：zram 接线、内建模块黑名单与 gki_defconfig）
 Upstream-Status: Not-Applicable
 KABI: none（修正 kernel/module.c 的黑名单返回值语义）
-Depends-On: 0012 lz4, 0013 lz4k/lz4kd codecs
+Depends-On: 0014 lz4, 0015 lz4k/lz4kd codecs
+Notes: 与来源相比：去掉来源让模块加载忽略符号 CRC 不符（check_version 返回 1）的改动和 OPLUS 模块名；黑名单拆成命令行与内建影子两条路径
 Tested-On: yudi 5.10.272（zram lz4kd、黑名单两路径）, 2026-10-29
+
+Co-Authored-By: Claude <noreply@anthropic.com>
 ---
+ arch/arm64/configs/gki_defconfig |  5 +++
+ drivers/block/zram/Kconfig       | 61 +++++++++++++++++++++++++++++++-
+ drivers/block/zram/zcomp.c       | 14 ++++++++
+ drivers/block/zram/zram_drv.c    |  2 +-
+ kernel/module.c                  | 32 +++++++++++++++--
+ 5 files changed, 110 insertions(+), 4 deletions(-)
+
 diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index 8923c1537..792ab1478 100644
+index 8f6c29c0b..e1c86a8f5 100644
 --- a/arch/arm64/configs/gki_defconfig
 +++ b/arch/arm64/configs/gki_defconfig
-@@ -863,3 +863,14 @@ CONFIG_FHANDLE=y
- 
- # Phase 10.1: NTSync for Wine/Proton.
- CONFIG_NTSYNC=y
-+
-+# Phase 10.4: ZRAM LZ4K/LZ4KD with ARM64 NEON.
+@@ -453,6 +453,11 @@ CONFIG_GNSS=y
+ CONFIG_BLK_DEV_LOOP=y
+ CONFIG_BLK_DEV_LOOP_MIN_COUNT=16
+ CONFIG_BLK_DEV_RAM=y
++# yudi (optional): zram + zsmalloc built in, replacing the vendor modules
 +CONFIG_ZSMALLOC=y
 +CONFIG_ZRAM=y
 +CONFIG_CRYPTO_LZO=y
 +CONFIG_ZRAM_DEF_COMP_LZ4=y
-+CONFIG_CRYPTO_LZ4HC=y
-+CONFIG_CRYPTO_LZ4K=y
-+CONFIG_CRYPTO_LZ4KD=y
-+CONFIG_CRYPTO_842=y
-+CONFIG_CRYPTO_LZ4K_OPLUS=y
+ CONFIG_BLK_DEV_RAM_SIZE=8192
+ CONFIG_SRAM=y
+ CONFIG_UID_SYS_STATS=y
 diff --git a/drivers/block/zram/Kconfig b/drivers/block/zram/Kconfig
 index fe7a4b7d3..1cc89d069 100644
 --- a/drivers/block/zram/Kconfig
@@ -226,3 +237,6 @@ index 0750270d1..1a9927b55 100644
  
  	err = rewrite_section_headers(info, flags);
  	if (err)
+-- 
+2.43.0
+

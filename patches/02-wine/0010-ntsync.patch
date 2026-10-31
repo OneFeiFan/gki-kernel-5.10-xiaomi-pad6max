@@ -1,7 +1,10 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From a87ec44fc83c584cd6c99450f186e2ddabe037ff Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] ntsync: add the NTSync driver for Wine/Proton
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Backport the 6.14 NTSync driver. Convert monotonic timeouts through the time namespace and reject owner == 0 in setup_wait().
 
@@ -13,30 +16,33 @@ Origin: WildKernels/kernel_patches（ntsync_base + ntsync_compat_android12-5.10�
 Upstream-Status: Backport
 KABI: none
 Depends-On: none
+Notes: 与来源相比：lockdep 断言改为驱动内的本地宏，不改内核 lockdep.c/lockdep.h；去掉来源在内核里给 /dev/ntsync 设 0666 和 gpu_device SELinux 标签的延迟工作，改由用户态 ntsync 模块处理
 Tested-On: yudi 5.10.272（ntsync 11/11）, 2026-10-29
 ---
- arch/arm64/configs/gki_defconfig |    3 +
+ arch/arm64/configs/gki_defconfig |    2 +
  drivers/misc/Kconfig             |   12 +
  drivers/misc/Makefile            |    1 +
  drivers/misc/ntsync.c            | 1241 ++++++++++++++++++++++++++++++
  include/uapi/linux/ntsync.h      |   59 ++
- 5 files changed, 1316 insertions(+)
+ 5 files changed, 1315 insertions(+)
  create mode 100644 drivers/misc/ntsync.c
  create mode 100644 include/uapi/linux/ntsync.h
 
 diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index dd7e08a..8923c15 100644
+index cd2f75097..9a569aae7 100644
 --- a/arch/arm64/configs/gki_defconfig
 +++ b/arch/arm64/configs/gki_defconfig
-@@ -860,3 +860,6 @@ CONFIG_UNIX_DIAG=y
- CONFIG_PACKET_DIAG=y
- CONFIG_NETLINK_DIAG=y
- CONFIG_FHANDLE=y
-+
-+# Phase 10.1: NTSync for Wine/Proton.
+@@ -705,6 +705,8 @@ CONFIG_DTPM=y
+ CONFIG_ANDROID=y
+ CONFIG_ANDROID_BINDER_IPC=y
+ CONFIG_ANDROID_BINDERFS=y
++# yudi: NTSync for Wine/Proton
 +CONFIG_NTSYNC=y
+ CONFIG_ANDROID_DEBUG_SYMBOLS=y
+ CONFIG_ANDROID_VENDOR_HOOKS=y
+ CONFIG_LIBNVDIMM=y
 diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
-index 47e70cd..420e35e 100644
+index 47e70cd2e..420e35e93 100644
 --- a/drivers/misc/Kconfig
 +++ b/drivers/misc/Kconfig
 @@ -284,6 +284,18 @@ config SGI_GRU_DEBUG
@@ -59,7 +65,7 @@ index 47e70cd..420e35e 100644
  	tristate "Medfield Avago APDS9802 ALS Sensor module"
  	depends on I2C
 diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
-index aecaaed..77ddf45 100644
+index aecaaed87..77ddf452a 100644
 --- a/drivers/misc/Makefile
 +++ b/drivers/misc/Makefile
 @@ -25,6 +25,7 @@ obj-$(CONFIG_ENCLOSURE_SERVICES) += enclosure.o
@@ -72,7 +78,7 @@ index aecaaed..77ddf45 100644
  obj-$(CONFIG_APDS9802ALS)	+= apds9802als.o
 diff --git a/drivers/misc/ntsync.c b/drivers/misc/ntsync.c
 new file mode 100644
-index 0000000..7ab7517
+index 000000000..7ab75176e
 --- /dev/null
 +++ b/drivers/misc/ntsync.c
 @@ -0,0 +1,1241 @@
@@ -1319,7 +1325,7 @@ index 0000000..7ab7517
 +MODULE_LICENSE("GPL");
 diff --git a/include/uapi/linux/ntsync.h b/include/uapi/linux/ntsync.h
 new file mode 100644
-index 0000000..6d06793
+index 000000000..6d0679351
 --- /dev/null
 +++ b/include/uapi/linux/ntsync.h
 @@ -0,0 +1,59 @@
@@ -1382,3 +1388,6 @@ index 0000000..6d06793
 +#define NTSYNC_IOC_EVENT_READ		_IOR ('N', 0x8d, struct ntsync_event_args)
 +
 +#endif
+-- 
+2.43.0
+

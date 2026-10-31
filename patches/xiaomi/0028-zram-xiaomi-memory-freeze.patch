@@ -1,0 +1,560 @@
+From 10ab2d17ff349caf418ea4904d6e15c249666681 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Sat, 31 Oct 2026 06:02:27 +0000
+Subject: [PATCH] zram: add Xiaomi memory freeze (mfz) writeback policy
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+HyperOS moves frozen apps into /dev/memcg/freeze-app and, once boot
+completes, init.rc marks that group through
+memory.anno_writeback_enable (and protected groups through
+anno_writeback_protected / anno_writeback_control). With
+persist.sys.mfz.enable=true, PerfInit and the ExtM service then use the
+mfz_* zram files.
+
+Pages entering zram are tagged from their memcg's android_oem_data1
+(the ACK 5.10 OEM slot of struct mem_cgroup, no layout change):
+protected pages are never written back (already in 0027), memory-freeze
+pages are tagged ZRAM_WRITEBACK_UNLIMITED. mfz_disk_quota reserves that
+many backing pages for them, mfz_enable turns the reservation on,
+"writeback idle <max> <idle_min> 1" writes back only memory-freeze
+pages, mfz_compr_data_size and mfz_idle_stat report their footprint,
+and bd_stat gains three columns (memory-freeze pages on, read from and
+written to the backing device).
+
+Ported from Xiaomi's 6.6 zram (bixi-v-oss) to the 5.10 ExtM driver from
+0027. The memcg files follow the 5.10 interface of Xiaomi's yudi
+zram.ko (anno_writeback_enable stores 2 = memory freeze for non-root
+groups, as its disassembly shows) and also offer the 6.6
+anno_writeback_control, since the ROM's init.rc writes both.
+
+Origin: MiCode/Xiaomi_Kernel_OpenSource bixi-v-oss 56295df675b9（6.6），drivers/block/zram/zram_drv.c 的 CONFIG_MI_MEMORY_FREEZE 部分；5.10 接口名与取值对照官方 yudi zram.ko（OS3.0.6.0 vendor_dlkm）
+Upstream-Status: Not-Applicable（小米厂商实现）
+KABI: none（memcg 标记使用 ACK 5.10 已有的 struct mem_cgroup::android_oem_data1）
+Depends-On: xiaomi/0027 ExtM zram
+Notes: 新增 CONFIG_MI_MEMORY_FREEZE（依赖 ZRAM_WRITEBACK、MEMCG）；writeback_quota、zgroup_enable 无任何公开源码，未实现
+Tested-On: 本地 clang 18.1.3 交叉编译 drivers/block/zram 通过（aarch64，gki_defconfig），无警告；未实机验证
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ arch/arm64/configs/gki_defconfig |   2 +
+ drivers/block/zram/Kconfig       |  11 ++
+ drivers/block/zram/zram_drv.c    | 278 ++++++++++++++++++++++++++++++-
+ drivers/block/zram/zram_drv.h    |  13 ++
+ 4 files changed, 301 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 2e3a2c1f3..ee2391234 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -467,6 +467,8 @@ CONFIG_BLK_DEV_SD=y
+ CONFIG_SCSI_UFSHCD=y
+ # yudi (xiaomi): ExtM zram tracking and batched writeback
+ CONFIG_MIUI_ZRAM_MEMORY_TRACKING=y
++# yudi (xiaomi): memory freeze (mfz) writeback policy
++CONFIG_MI_MEMORY_FREEZE=y
+ CONFIG_SCSI_UFSHCD_PCI=y
+ CONFIG_SCSI_UFSHCD_PLATFORM=y
+ CONFIG_SCSI_UFS_DWC_TC_PLATFORM=y
+diff --git a/drivers/block/zram/Kconfig b/drivers/block/zram/Kconfig
+index f95aeef63..3b93150a3 100644
+--- a/drivers/block/zram/Kconfig
++++ b/drivers/block/zram/Kconfig
+@@ -97,6 +97,17 @@ config ZRAM_MEMORY_TRACKING
+ 
+ 	  See Documentation/admin-guide/blockdev/zram.rst for more information.
+ 
++config MI_MEMORY_FREEZE
++	bool "Xiaomi memory freeze writeback policy for zram"
++	depends on ZRAM_WRITEBACK && MEMCG
++	help
++	  Pages of memory cgroups marked through memory.anno_writeback_enable
++	  (or anno_writeback_control = 2) are tagged when they enter zram.
++	  They may use the backing space reserved by mfz_disk_quota, and
++	  "writeback idle <max> <idle_min> 1" writes back only those pages.
++	  Adds mfz_enable, mfz_disk_quota, mfz_compr_data_size, mfz_idle_stat
++	  and three memory-freeze columns in bd_stat.
++
+ config MIUI_ZRAM_MEMORY_TRACKING
+ 	bool "Track zRam stats"
+ 	depends on ZRAM
+diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
+index 8bac2fe66..d61d4fc4b 100644
+--- a/drivers/block/zram/zram_drv.c
++++ b/drivers/block/zram/zram_drv.c
+@@ -19,6 +19,9 @@
+ enum anon_writeback_flags {
+ 	ANON_WRITEBACK_NORMAL= 0,
+ 	ANON_WRITEBACK_PROTECTED,
++#if defined(CONFIG_MI_MEMORY_FREEZE)
++	ANON_WRITEBACK_UNLIMITED,
++#endif
+ 	__NR_ANON_WRITEBACK_FLAGS,
+ };
+ #endif
+@@ -764,7 +767,8 @@ static int read_from_bdev_async(struct zram *zram, struct bio_vec *bvec,
+ 
+ /* Returns true on success, false on parsing error. */
+ static bool writeback_parse_input(const char *buf,
+-			unsigned long *wb_max, unsigned int *wb_idle_min)
++			unsigned long *wb_max, unsigned int *wb_idle_min,
++			unsigned int *mf_cgroup)
+ {
+ 	char *argbuf, *args, *arg;
+ 	bool ret = false;
+@@ -789,8 +793,18 @@ static bool writeback_parse_input(const char *buf,
+ 			if (kstrtouint(arg, 10, wb_idle_min))
+ 				goto err;
+ 
+-			if (strsep(&args, " "))
++			/* get @mf_cgroup: write back memory-freeze pages only */
++			arg = strsep(&args, " ");
++			if (arg) {
++#ifdef CONFIG_MI_MEMORY_FREEZE
++				if (kstrtouint(arg, 10, mf_cgroup))
++					goto err;
++				if (strsep(&args, " "))
++					goto err;
++#else
+ 				goto err;
++#endif
++			}
+ 
+ 			if (*wb_idle_min > ZRAM_WB_IDLE_MAX)
+ 				*wb_idle_min = ZRAM_WB_IDLE_MAX;
+@@ -811,6 +825,9 @@ static int wait_for_writeback_batch(struct zram *zram, int start_blkidx, int nr_
+ 	struct bio_vec bio_vecs[MAX_WRITEBACK_SIZE];
+ 	int i, err, index;
+ 	int wb_pages_nr = 0;
++#ifdef CONFIG_MI_MEMORY_FREEZE
++	bool mfz_flag;
++#endif
+ 
+ 	bio_init(&bio, bio_vecs, nr_write);
+ 	bio_set_dev(&bio, zram->bdev);
+@@ -828,6 +845,11 @@ static int wait_for_writeback_batch(struct zram *zram, int start_blkidx, int nr_
+ 			zram_clear_flag(zram, index, ZRAM_UNDER_WB);
+ 			zram_clear_flag(zram, index, ZRAM_IDLE);
+ 			zram_clear_idle_count(zram, index);
++#ifdef CONFIG_MI_MEMORY_FREEZE
++			if (zram_test_flag(zram, index, ZRAM_WRITEBACK_UNLIMITED) &&
++			    atomic64_read(&zram->stats.mf_bd_count) > 0)
++				atomic64_dec(&zram->stats.mf_bd_count);
++#endif
+ 			zram_slot_unlock(zram, index);
+ 			free_block_bdev(zram, start_blkidx + i);
+ 		}
+@@ -851,11 +873,18 @@ static int wait_for_writeback_batch(struct zram *zram, int start_blkidx, int nr_
+ 		 * Thus, we could close the race by checking ZRAM_IDLE bit.
+ 		 */
+ 		zram_slot_lock(zram, index);
++#ifdef CONFIG_MI_MEMORY_FREEZE
++		mfz_flag = zram_test_flag(zram, index, ZRAM_WRITEBACK_UNLIMITED);
++#endif
+ 		if (!zram_allocated(zram, index) ||
+ 			  !zram_test_flag(zram, index, ZRAM_IDLE)) {
+ 			zram_clear_flag(zram, index, ZRAM_UNDER_WB);
+ 			zram_clear_flag(zram, index, ZRAM_IDLE);
+ 			zram_clear_idle_count(zram, index);
++#ifdef CONFIG_MI_MEMORY_FREEZE
++			if (mfz_flag && atomic64_read(&zram->stats.mf_bd_count) > 0)
++				atomic64_dec(&zram->stats.mf_bd_count);
++#endif
+ 			zram_slot_unlock(zram, index);
+ 			free_block_bdev(zram, start_blkidx + i);
+ 			continue;
+@@ -864,6 +893,13 @@ static int wait_for_writeback_batch(struct zram *zram, int start_blkidx, int nr_
+ 		zram_free_page(zram, index);
+ 		zram_clear_flag(zram, index, ZRAM_UNDER_WB);
+ 		zram_set_flag(zram, index, ZRAM_WB);
++#ifdef CONFIG_MI_MEMORY_FREEZE
++		if (mfz_flag) {
++			/* zram_free_page() dropped the tag; keep it on the written-back slot */
++			zram_set_flag(zram, index, ZRAM_WRITEBACK_UNLIMITED);
++			atomic64_inc(&zram->stats.mf_bd_writes);
++		}
++#endif
+ 		zram_set_element(zram, index, start_blkidx + i);
+ 		wb_pages_nr++;
+ 		// blk_idx = 0;
+@@ -878,6 +914,26 @@ static int wait_for_writeback_batch(struct zram *zram, int start_blkidx, int nr_
+ 	return wb_pages_nr;
+ }
+ 
++#ifdef CONFIG_MI_MEMORY_FREEZE
++/*
++ * mfz_disk_quota reserves that many backing pages for memory-freeze pages:
++ * other pages may only use nr_pages - mfz_disk_quota of the backing device.
++ */
++static bool extm_has_disk_quota(struct zram *zram)
++{
++	unsigned long bd_count, mf_bd_count, others_max;
++
++	if (zram->mfz_disk_quota == 0)
++		return true;
++
++	bd_count = atomic64_read(&zram->stats.bd_count);
++	mf_bd_count = atomic64_read(&zram->stats.mf_bd_count);
++	others_max = zram->nr_pages - zram->mfz_disk_quota;
++
++	return bd_count - mf_bd_count < others_max;
++}
++#endif
++
+ static ssize_t writeback_store(struct device *dev,
+ 		struct device_attribute *attr, const char *buf, size_t len)
+ {
+@@ -885,13 +941,14 @@ static ssize_t writeback_store(struct device *dev,
+ 	unsigned long nr_pages = zram->disksize >> PAGE_SHIFT;
+ 	unsigned long index, wb_max = ULONG_MAX;
+ 	unsigned int wb_idle_min = ZRAM_WB_IDLE_DEFAULT;
++	unsigned int mf_cgroup = 0;
+ 	struct writeback_batch_pages batch_pages[MAX_WRITEBACK_SIZE];
+ 	int nr_write = 0, flush_count = 0;
+ 	ssize_t ret = len;
+ 	int mode;
+ 	unsigned long blk_idx = 0, start_blkidx = 0, wb_pages_nr = 0;
+ 
+-	if (writeback_parse_input(buf, &wb_max, &wb_idle_min))
++	if (writeback_parse_input(buf, &wb_max, &wb_idle_min, &mf_cgroup))
+ 		mode = IDLE_WRITEBACK;
+ 	else if (sysfs_streq(buf, "idle"))
+ 		mode = IDLE_WRITEBACK;
+@@ -994,6 +1051,18 @@ static ssize_t writeback_store(struct device *dev,
+ 			goto next;
+ 		if (zram_test_flag(zram, index, ZRAM_WRITEBACK_PROTECTED))
+ 			goto next;
++#ifdef CONFIG_MI_MEMORY_FREEZE
++		/* @mf_cgroup: only pages of memory-freeze cgroups */
++		if (mf_cgroup &&
++		    !zram_test_flag(zram, index, ZRAM_WRITEBACK_UNLIMITED))
++			goto next;
++		if (zram->mfz_enable &&
++		    !zram_test_flag(zram, index, ZRAM_WRITEBACK_UNLIMITED) &&
++		    !extm_has_disk_quota(zram))
++			goto next;
++		if (zram_test_flag(zram, index, ZRAM_WRITEBACK_UNLIMITED))
++			atomic64_inc(&zram->stats.mf_bd_count);
++#endif
+ 		/*
+ 		 * Clearing ZRAM_UNDER_WB is duty of caller.
+ 		 * IOW, zram_free_page never clear it.
+@@ -1007,6 +1076,11 @@ static ssize_t writeback_store(struct device *dev,
+ 			zram_clear_flag(zram, index, ZRAM_UNDER_WB);
+ 			zram_clear_flag(zram, index, ZRAM_IDLE);
+ 			zram_clear_idle_count(zram, index);
++#ifdef CONFIG_MI_MEMORY_FREEZE
++			if (zram_test_flag(zram, index, ZRAM_WRITEBACK_UNLIMITED) &&
++			    atomic64_read(&zram->stats.mf_bd_count) > 0)
++				atomic64_dec(&zram->stats.mf_bd_count);
++#endif
+ 			zram_slot_unlock(zram, index);
+ 			continue;
+ 		}
+@@ -1525,6 +1599,116 @@ static ssize_t new_stat_show(struct device *dev,
+ 
+ #ifdef CONFIG_ZRAM_WRITEBACK
+ #define FOUR_K(x) ((x) * (1 << (PAGE_SHIFT - 12)))
++#ifdef CONFIG_MI_MEMORY_FREEZE
++static ssize_t mfz_enable_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t len)
++{
++	struct zram *zram = dev_to_zram(dev);
++	unsigned int val;
++
++	if (kstrtouint(buf, 10, &val))
++		return -EINVAL;
++
++	down_read(&zram->init_lock);
++	spin_lock(&zram->wb_limit_lock);
++	zram->mfz_enable = !!val;
++	spin_unlock(&zram->wb_limit_lock);
++	up_read(&zram->init_lock);
++
++	return len;
++}
++
++static ssize_t mfz_enable_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct zram *zram = dev_to_zram(dev);
++
++	return scnprintf(buf, PAGE_SIZE, "%u\n", zram->mfz_enable);
++}
++
++static ssize_t mfz_disk_quota_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t len)
++{
++	struct zram *zram = dev_to_zram(dev);
++	unsigned long val;
++
++	if (kstrtoul(buf, 10, &val))
++		return -EINVAL;
++
++	down_read(&zram->init_lock);
++	if (val > zram->nr_pages) {
++		up_read(&zram->init_lock);
++		return -EINVAL;
++	}
++	spin_lock(&zram->wb_limit_lock);
++	zram->mfz_disk_quota = val;
++	spin_unlock(&zram->wb_limit_lock);
++	up_read(&zram->init_lock);
++	pr_info("mfz_quota: %lu\n", val);
++
++	return len;
++}
++
++static ssize_t mfz_disk_quota_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct zram *zram = dev_to_zram(dev);
++
++	return scnprintf(buf, PAGE_SIZE, "%lu\n", zram->mfz_disk_quota);
++}
++
++static ssize_t mfz_compr_data_size_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct zram *zram = dev_to_zram(dev);
++	ssize_t ret;
++
++	down_read(&zram->init_lock);
++	ret = scnprintf(buf, PAGE_SIZE, "%8llu\n",
++			(u64)atomic64_read(&zram->stats.mfz_compr_data_size));
++	up_read(&zram->init_lock);
++
++	return ret;
++}
++
++/* Idle memory-freeze pages per idle count, 1..ZRAM_WB_IDLE_MAX */
++static ssize_t mfz_idle_stat_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct zram *zram = dev_to_zram(dev);
++	unsigned long index, nr_pages = zram->disksize >> PAGE_SHIFT;
++	unsigned long pages_nr[ZRAM_WB_IDLE_MAX + 1] = { 0 };
++	unsigned long idle_count;
++	unsigned int i;
++	ssize_t ret = -EINVAL;
++	size_t off = 0;
++
++	down_read(&zram->init_lock);
++	if (!init_done(zram))
++		goto out;
++
++	for (index = 0; index < nr_pages; index++) {
++		zram_slot_lock(zram, index);
++		if (zram_get_obj_size(zram, index) &&
++		    zram_test_flag(zram, index, ZRAM_IDLE) &&
++		    zram_test_flag(zram, index, ZRAM_WRITEBACK_UNLIMITED)) {
++			idle_count = zram_get_idle_count(zram, index);
++			if (idle_count <= ZRAM_WB_IDLE_MAX)
++				pages_nr[idle_count]++;
++		}
++		zram_slot_unlock(zram, index);
++	}
++
++	for (i = 1; i <= ZRAM_WB_IDLE_MAX; i++)
++		off += scnprintf(buf + off, PAGE_SIZE - off, "%lu ", pages_nr[i]);
++	buf[off - 1] = '\n';
++	ret = off;
++out:
++	up_read(&zram->init_lock);
++	return ret;
++}
++#endif
++
+ static ssize_t bd_stat_show(struct device *dev,
+ 		struct device_attribute *attr, char *buf)
+ {
+@@ -1532,11 +1716,22 @@ static ssize_t bd_stat_show(struct device *dev,
+ 	ssize_t ret;
+ 
+ 	down_read(&zram->init_lock);
++#ifdef CONFIG_MI_MEMORY_FREEZE
++	ret = scnprintf(buf, PAGE_SIZE,
++		"%8llu %8llu %8llu %8llu %8llu %8llu\n",
++			FOUR_K((u64)atomic64_read(&zram->stats.bd_count)),
++			FOUR_K((u64)atomic64_read(&zram->stats.bd_reads)),
++			FOUR_K((u64)atomic64_read(&zram->stats.bd_writes)),
++			FOUR_K((u64)atomic64_read(&zram->stats.mf_bd_count)),
++			FOUR_K((u64)atomic64_read(&zram->stats.mf_bd_reads)),
++			FOUR_K((u64)atomic64_read(&zram->stats.mf_bd_writes)));
++#else
+ 	ret = scnprintf(buf, PAGE_SIZE,
+ 		"%8llu %8llu %8llu\n",
+ 			FOUR_K((u64)atomic64_read(&zram->stats.bd_count)),
+ 			FOUR_K((u64)atomic64_read(&zram->stats.bd_reads)),
+ 			FOUR_K((u64)atomic64_read(&zram->stats.bd_writes)));
++#endif
+ 	up_read(&zram->init_lock);
+ 
+ 	return ret;
+@@ -1768,6 +1963,12 @@ static DEVICE_ATTR_RO(idle_stat);
+ static DEVICE_ATTR_RO(new_stat);
+ #ifdef CONFIG_ZRAM_WRITEBACK
+ static DEVICE_ATTR_RO(bd_stat);
++#ifdef CONFIG_MI_MEMORY_FREEZE
++static DEVICE_ATTR_RW(mfz_enable);
++static DEVICE_ATTR_RW(mfz_disk_quota);
++static DEVICE_ATTR_RO(mfz_compr_data_size);
++static DEVICE_ATTR_RO(mfz_idle_stat);
++#endif
+ #ifdef CONFIG_MIUI_ZRAM_MEMORY_TRACKING
+ static DEVICE_ATTR_RO(wb_pages_max);
+ #endif
+@@ -1849,6 +2050,16 @@ static void zram_free_page(struct zram *zram, size_t index)
+ 	if (zram_test_flag(zram, index, ZRAM_WRITEBACK_PROTECTED)) {
+ 		zram_clear_flag(zram, index, ZRAM_WRITEBACK_PROTECTED);
+ 	}
++#if defined(CONFIG_MI_MEMORY_FREEZE)
++	if (zram_test_flag(zram, index, ZRAM_WRITEBACK_UNLIMITED)) {
++		zram_clear_flag(zram, index, ZRAM_WRITEBACK_UNLIMITED);
++		if (zram_test_flag(zram, index, ZRAM_WB) &&
++		    atomic64_read(&zram->stats.mf_bd_count) > 0)
++			atomic64_dec(&zram->stats.mf_bd_count);
++		atomic64_sub(zram_get_obj_size(zram, index),
++			     &zram->stats.mfz_compr_data_size);
++	}
++#endif
+ #endif
+ 
+ 	if (zram_test_flag(zram, index, ZRAM_WB)) {
+@@ -1899,6 +2110,11 @@ static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
+ 	if (zram_test_flag(zram, index, ZRAM_WB)) {
+ 		struct bio_vec bvec;
+ 
++#ifdef CONFIG_MI_MEMORY_FREEZE
++		if (zram_test_flag(zram, index, ZRAM_WRITEBACK_UNLIMITED))
++			atomic64_inc(&zram->stats.mf_bd_reads);
++#endif
++
+ 		zram_slot_unlock(zram, index);
+ 
+ 		bvec.bv_page = page;
+@@ -2107,6 +2323,12 @@ static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec,
+ 
+ 		if (android_oem_data1 == ANON_WRITEBACK_PROTECTED)
+ 			zram_set_flag(zram, index, ZRAM_WRITEBACK_PROTECTED);
++#if defined(CONFIG_MI_MEMORY_FREEZE)
++		if (android_oem_data1 == ANON_WRITEBACK_UNLIMITED) {
++			zram_set_flag(zram, index, ZRAM_WRITEBACK_UNLIMITED);
++			atomic64_add(comp_len, &zram->stats.mfz_compr_data_size);
++		}
++#endif
+         }
+ #endif
+ 	zram_slot_unlock(zram, index);
+@@ -2570,6 +2792,12 @@ static struct attribute *zram_disk_attrs[] = {
+ 	&dev_attr_new_stat.attr,
+ #ifdef CONFIG_ZRAM_WRITEBACK
+ 	&dev_attr_bd_stat.attr,
++#ifdef CONFIG_MI_MEMORY_FREEZE
++	&dev_attr_mfz_enable.attr,
++	&dev_attr_mfz_disk_quota.attr,
++	&dev_attr_mfz_compr_data_size.attr,
++	&dev_attr_mfz_idle_stat.attr,
++#endif
+ #ifdef CONFIG_MIUI_ZRAM_MEMORY_TRACKING
+ 	&dev_attr_wb_pages_max.attr,
+ #endif
+@@ -2844,12 +3072,56 @@ static int mem_cgroup_anno_writeback_protected_write(struct cgroup_subsys_state
+ 	return 0;
+ }
+ 
++/* 6.6 name, used by newer HyperOS: 0 normal, 1 protected, 2 memory freeze */
++static u64 mem_cgroup_anno_writeback_control_read(struct cgroup_subsys_state *css,
++						  struct cftype *cft)
++{
++	return mem_cgroup_from_css(css)->android_oem_data1;
++}
++
++static int mem_cgroup_anno_writeback_control_write(struct cgroup_subsys_state *css,
++						   struct cftype *cft, u64 val)
++{
++	if (css->parent && val < __NR_ANON_WRITEBACK_FLAGS)
++		mem_cgroup_from_css(css)->android_oem_data1 = val;
++	return 0;
++}
++
++#ifdef CONFIG_MI_MEMORY_FREEZE
++/* 5.10 name, as in Xiaomi's yudi zram.ko: writing non-zero marks memory freeze */
++static u64 mem_cgroup_anno_writeback_enable_read(struct cgroup_subsys_state *css,
++						 struct cftype *cft)
++{
++	return mem_cgroup_from_css(css)->android_oem_data1;
++}
++
++static int mem_cgroup_anno_writeback_enable_write(struct cgroup_subsys_state *css,
++						  struct cftype *cft, u64 val)
++{
++	if (val && css->parent)
++		mem_cgroup_from_css(css)->android_oem_data1 = ANON_WRITEBACK_UNLIMITED;
++	return 0;
++}
++#endif
++
+ static struct cftype memsw_protected_files[] = {
+ 	{
+ 		.name = "anno_writeback_protected",
+ 		.read_u64 = mem_cgroup_anno_writeback_protected_read,
+ 		.write_u64 = mem_cgroup_anno_writeback_protected_write,
+ 	},
++	{
++		.name = "anno_writeback_control",
++		.read_u64 = mem_cgroup_anno_writeback_control_read,
++		.write_u64 = mem_cgroup_anno_writeback_control_write,
++	},
++#ifdef CONFIG_MI_MEMORY_FREEZE
++	{
++		.name = "anno_writeback_enable",
++		.read_u64 = mem_cgroup_anno_writeback_enable_read,
++		.write_u64 = mem_cgroup_anno_writeback_enable_write,
++	},
++#endif
+ 	{ },	/* terminate */
+ };
+ #endif
+diff --git a/drivers/block/zram/zram_drv.h b/drivers/block/zram/zram_drv.h
+index e9b416ceb..6d00887f5 100644
+--- a/drivers/block/zram/zram_drv.h
++++ b/drivers/block/zram/zram_drv.h
+@@ -53,6 +53,9 @@ enum zram_pageflags {
+ 	ZRAM_IDLE,	/* not accessed page since last idle marking */
+ #if defined(CONFIG_ZRAM_WRITEBACK)
+ 	ZRAM_WRITEBACK_PROTECTED, /* the page is writeback protected */
++#if defined(CONFIG_MI_MEMORY_FREEZE)
++	ZRAM_WRITEBACK_UNLIMITED, /* page of a memory-freeze cgroup, not bound by mfz_disk_quota */
++#endif
+ #endif
+ 	__NR_ZRAM_PAGEFLAGS,
+ };
+@@ -113,6 +116,12 @@ struct zram_stats {
+ 	atomic64_t bd_count;		/* no. of pages in backing device */
+ 	atomic64_t bd_reads;		/* no. of reads from backing device */
+ 	atomic64_t bd_writes;		/* no. of writes from backing device */
++#ifdef CONFIG_MI_MEMORY_FREEZE
++	atomic64_t mf_bd_count;		/* no. of memory-freeze pages in backing device */
++	atomic64_t mf_bd_reads;		/* no. of memory-freeze reads from backing device */
++	atomic64_t mf_bd_writes;	/* no. of memory-freeze writes to backing device */
++	atomic64_t mfz_compr_data_size;	/* compressed size of memory-freeze pages in zram */
++#endif
+ #ifdef CONFIG_MIUI_ZRAM_MEMORY_TRACKING
+ 	atomic64_t wb_pages_max;	/* no. of max pages in backing device */
+ #endif
+@@ -156,6 +165,10 @@ struct zram {
+ 	spinlock_t wb_limit_lock;
+ 	bool wb_limit_enable;
+ 	u64 bd_wb_limit;
++#ifdef CONFIG_MI_MEMORY_FREEZE
++	unsigned long mfz_disk_quota;	/* backing pages reserved for memory-freeze pages */
++	unsigned int mfz_enable;
++#endif
+ 	struct block_device *bdev;
+ 	unsigned int old_block_size;
+ 	unsigned long *bitmap;
+-- 
+2.43.0
+

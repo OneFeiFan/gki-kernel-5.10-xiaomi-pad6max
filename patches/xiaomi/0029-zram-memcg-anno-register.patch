@@ -1,0 +1,43 @@
+From 59cde2a4dfab611f9ebf1627cc1d820b882569cf Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Sat, 31 Oct 2026 14:43:09 +0800
+Subject: [PATCH] zram: register the anno writeback cgroup files before
+ returning
+
+0028 added the memcg cftype handlers but placed
+cgroup_add_legacy_cftypes() after the unconditional return in
+zram_init(), so the files never appeared. Move the registration before
+the return.
+
+Origin: local fix on top of xiaomi/0028 (handoff 2026-10-31)
+Upstream-Status: Not-Applicable
+KABI: none
+Depends-On: xiaomi/0028
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ drivers/block/zram/zram_drv.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
+index d61d4fc4b..fceb570e4 100644
+--- a/drivers/block/zram/zram_drv.c
++++ b/drivers/block/zram/zram_drv.c
+@@ -3162,12 +3162,12 @@ static int __init zram_init(void)
+ 		num_devices--;
+ 	}
+ 
+-	return 0;
+-
+ #if defined(CONFIG_ZRAM_WRITEBACK)
+ 	WARN_ON(cgroup_add_legacy_cftypes(&memory_cgrp_subsys, memsw_protected_files));
+ #endif
+ 
++	return 0;
++
+ out_error:
+ 	destroy_devices();
+ 	return ret;
+-- 
+2.34.1
+

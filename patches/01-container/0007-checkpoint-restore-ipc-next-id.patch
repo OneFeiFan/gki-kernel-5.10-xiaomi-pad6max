@@ -1,7 +1,10 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From b07dd922ddc691b00da46345e73b010c7fc97e7e Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:57 +0800
 Subject: [PATCH] ipc: keep ipc_ids stock for CHECKPOINT_RESTORE
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 CHECKPOINT_RESTORE adds ipc_ids.next_id, which moves key_ht from 104
 to 112. Keep next_id in a side table instead, so key_ht stays at 104
@@ -17,39 +20,37 @@ Origin: 本地实现（2026-10-29 检索 refs 全部仓库、GitHub 代码搜索
 Upstream-Status: Not-Applicable
 KABI: __GENKSYMS__ 守卫（ipc_ids）
 Depends-On: none
+Notes: 指定 next_id 时 idr 分配上限为 ipc_mni，已包含 CVE-2026-52923（ipc: limit next_id allocation to the valid ID range）的修复
 Tested-On: yudi 5.10.272, 2026-10-29
 ---
- arch/arm64/configs/gki_defconfig |   6 +-
+ arch/arm64/configs/gki_defconfig |   7 +-
  include/linux/ipc_namespace.h    |  16 ++++-
  ipc/ipc_sysctl.c                 |  54 +++++++++++---
  ipc/namespace.c                  |   2 +
  ipc/util.c                       | 117 ++++++++++++++++++++++++++++---
  ipc/util.h                       |  18 +++++
- 6 files changed, 192 insertions(+), 21 deletions(-)
+ 6 files changed, 193 insertions(+), 21 deletions(-)
 
 diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index 3622ce1..dd7e08a 100644
+index 0cf694046..cd2f75097 100644
 --- a/arch/arm64/configs/gki_defconfig
 +++ b/arch/arm64/configs/gki_defconfig
-@@ -33,7 +33,6 @@ CONFIG_RT_SOFTINT_OPTIMIZATION=y
+@@ -44,7 +44,12 @@ CONFIG_RT_SOFTINT_OPTIMIZATION=y
  # CONFIG_RD_LZO is not set
  CONFIG_BOOT_CONFIG=y
  # CONFIG_SYSFS_SYSCALL is not set
 -# CONFIG_FHANDLE is not set
- CONFIG_KALLSYMS_ALL=y
- CONFIG_BPF_SYSCALL=y
- CONFIG_BPF_JIT_ALWAYS_ON=y
-@@ -856,3 +855,8 @@ CONFIG_NET_SCH_FQ_PIE=y
- # Phase 7: block throttle, net classifier, checkpoint, Btrfs.
- CONFIG_BLK_DEV_THROTTLING=y
- CONFIG_NET_CLS_CGROUP=y
++CONFIG_FHANDLE=y
++# yudi: checkpoint/restore, CRIU socket diag
 +CONFIG_CHECKPOINT_RESTORE=y
 +CONFIG_UNIX_DIAG=y
 +CONFIG_PACKET_DIAG=y
 +CONFIG_NETLINK_DIAG=y
-+CONFIG_FHANDLE=y
+ CONFIG_KALLSYMS_ALL=y
+ CONFIG_BPF_SYSCALL=y
+ CONFIG_BPF_JIT_ALWAYS_ON=y
 diff --git a/include/linux/ipc_namespace.h b/include/linux/ipc_namespace.h
-index 0832510..73d630d 100644
+index 083251051..73d630dca 100644
 --- a/include/linux/ipc_namespace.h
 +++ b/include/linux/ipc_namespace.h
 @@ -10,6 +10,8 @@
@@ -86,7 +87,7 @@ index 0832510..73d630d 100644
  	refcount_t	count;
  	struct ipc_ids	ids[3];
 diff --git a/ipc/ipc_sysctl.c b/ipc/ipc_sysctl.c
-index 3f312bf..eb77037 100644
+index 3f312bf2b..eb7703747 100644
 --- a/ipc/ipc_sysctl.c
 +++ b/ipc/ipc_sysctl.c
 @@ -22,6 +22,14 @@ static void *get_ipc(struct ctl_table *table)
@@ -185,7 +186,7 @@ index 3f312bf..eb77037 100644
  		.extra2		= SYSCTL_INT_MAX,
  	},
 diff --git a/ipc/namespace.c b/ipc/namespace.c
-index 24e7b45..02cf861 100644
+index 24e7b4532..02cf861a7 100644
 --- a/ipc/namespace.c
 +++ b/ipc/namespace.c
 @@ -113,6 +113,8 @@ void free_ipcs(struct ipc_namespace *ns, struct ipc_ids *ids,
@@ -198,7 +199,7 @@ index 24e7b45..02cf861 100644
  
  static void free_ipc_ns(struct ipc_namespace *ns)
 diff --git a/ipc/util.c b/ipc/util.c
-index 9fd6509..73aeb0f 100644
+index 9fd65095e..73aeb0fcd 100644
 --- a/ipc/util.c
 +++ b/ipc/util.c
 @@ -61,6 +61,8 @@
@@ -348,7 +349,7 @@ index 9fd6509..73aeb0f 100644
  	/*
  	 * As soon as a new object is inserted into the idr,
 diff --git a/ipc/util.h b/ipc/util.h
-index 5766c61..72316a9 100644
+index 5766c61ae..72316a95f 100644
 --- a/ipc/util.h
 +++ b/ipc/util.h
 @@ -113,6 +113,24 @@ struct seq_file;
@@ -376,3 +377,6 @@ index 5766c61..72316a9 100644
  #ifdef CONFIG_PROC_FS
  void __init ipc_init_proc_interface(const char *path, const char *header,
  		int ids, int (*show)(struct seq_file *, void *));
+-- 
+2.43.0
+

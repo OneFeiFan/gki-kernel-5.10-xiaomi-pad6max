@@ -36,14 +36,14 @@ static int __net_init nf_log_netdev_net_init(struct net *net)
 	return nf_log_set(net, NFPROTO_NETDEV, &nf_netdev_logger);
 }
 
-static void __net_exit nf_log_netdev_net_exit(struct net *net)
+static void __net_exit nf_log_netdev_net_pre_exit(struct net *net)
 {
 	nf_log_unset(net, &nf_netdev_logger);
 }
 
 static struct pernet_operations nf_log_netdev_net_ops = {
 	.init = nf_log_netdev_net_init,
-	.exit = nf_log_netdev_net_exit,
+	.pre_exit = nf_log_netdev_net_pre_exit,
 };
 
 static int __init nf_log_netdev_init(void)

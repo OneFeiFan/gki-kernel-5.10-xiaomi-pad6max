@@ -1,8 +1,11 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From d410b43effe3dfa7cff6a20312a4bc4e94c9fc2d Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:55 +0800
 Subject: [PATCH] cgroup: enable devices, pids, net_cls and perf with ABI-safe
  state
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Keep struct cgroup and css_set sizes unchanged: put the new controller state in the dynamically allocated ext objects and hide the added fields from genksyms.
 
@@ -30,23 +33,23 @@ Tested-On: yudi 5.10.272, 2026-10-29
  10 files changed, 372 insertions(+), 104 deletions(-)
 
 diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index a5d3174..7611835 100644
+index d9df33fff..5496677b0 100644
 --- a/arch/arm64/configs/gki_defconfig
 +++ b/arch/arm64/configs/gki_defconfig
-@@ -704,6 +704,11 @@ CONFIG_POSIX_MQUEUE=y
- CONFIG_IPC_NS=y
- CONFIG_USER_NS=y
- CONFIG_DEVTMPFS=y
+@@ -18,6 +18,11 @@ CONFIG_UCLAMP_BUCKETS_COUNT=20
+ CONFIG_CGROUPS=y
+ CONFIG_MEMCG=y
+ CONFIG_BLK_CGROUP=y
++# yudi: cgroup v1 devices/pids/perf/net_cls (KABI-safe cgroup split)
 +CONFIG_CGROUP_DEVICE=y
 +CONFIG_CGROUP_PIDS=y
-+# CGROUP_PERF keeps the stock KMI via the cgrp split in linux/perf_event.h.
 +CONFIG_CGROUP_PERF=y
 +CONFIG_CGROUP_NET_CLASSID=y
- # Phase 4: bridge netfilter + IPv6 NAT.  Ebtables and VLAN filtering are
- # Phase 5: IPVS + SCTP.  IP_VS_TWOS does not exist in 5.10 (added later).
- # Phase 6: tunnels / virtual NICs / tc.
+ CONFIG_CGROUP_SCHED=y
+ CONFIG_UCLAMP_TASK_GROUP=y
+ CONFIG_CGROUP_FREEZER=y
 diff --git a/include/linux/cgroup-defs.h b/include/linux/cgroup-defs.h
-index 3ee42f1..11cbe09 100644
+index 3ee42f154..11cbe0950 100644
 --- a/include/linux/cgroup-defs.h
 +++ b/include/linux/cgroup-defs.h
 @@ -21,6 +21,7 @@
@@ -267,7 +270,7 @@ index 3ee42f1..11cbe09 100644
   * A cgroup_root represents the root of a cgroup hierarchy, and may be
   * associated with a kernfs_root to form an active hierarchy.  This is
 diff --git a/include/linux/cgroup.h b/include/linux/cgroup.h
-index 3c0b5b3..f681238 100644
+index 3c0b5b31a..f681238cc 100644
 --- a/include/linux/cgroup.h
 +++ b/include/linux/cgroup.h
 @@ -474,7 +474,7 @@ extern spinlock_t css_set_lock;
@@ -289,7 +292,7 @@ index 3c0b5b3..f681238 100644
  
  static inline struct cgroup *task_cgroup(struct task_struct *task,
 diff --git a/include/linux/cgroup_subsys.h b/include/linux/cgroup_subsys.h
-index acb77dc..07191d6 100644
+index acb77dcff..07191d6a3 100644
 --- a/include/linux/cgroup_subsys.h
 +++ b/include/linux/cgroup_subsys.h
 @@ -29,22 +29,10 @@ SUBSYS(io)
@@ -365,7 +368,7 @@ index acb77dc..07191d6 100644
   * DO NOT ADD ANY SUBSYSTEM WITHOUT EXPLICIT ACKS FROM CGROUP MAINTAINERS.
   */
 diff --git a/include/linux/perf_event.h b/include/linux/perf_event.h
-index 5cac2f2..d8c8d90 100644
+index 5cac2f291..d8c8d9049 100644
 --- a/include/linux/perf_event.h
 +++ b/include/linux/perf_event.h
 @@ -725,11 +725,22 @@ struct perf_event {
@@ -453,7 +456,7 @@ index 5cac2f2..d8c8d90 100644
  	struct list_head		cgrp_cpuctx_entry;
  #endif
 diff --git a/kernel/cgroup/cgroup-v1.c b/kernel/cgroup/cgroup-v1.c
-index 3a5941c..e4e3a4c 100644
+index 3a5941c28..e4e3a4c82 100644
 --- a/kernel/cgroup/cgroup-v1.c
 +++ b/kernel/cgroup/cgroup-v1.c
 @@ -1218,6 +1218,16 @@ static int cgroup1_root_to_use(struct fs_context *fc)
@@ -474,7 +477,7 @@ index 3a5941c..e4e3a4c 100644
  	init_cgroup_root(ctx);
  
 diff --git a/kernel/cgroup/cgroup.c b/kernel/cgroup/cgroup.c
-index b0566af..02d3c58 100644
+index b0566af16..02d3c5869 100644
 --- a/kernel/cgroup/cgroup.c
 +++ b/kernel/cgroup/cgroup.c
 @@ -503,7 +503,7 @@ static struct cgroup_subsys_state *cgroup_css(struct cgroup *cgrp,
@@ -781,7 +784,7 @@ index b0566af..02d3c58 100644
  	ret = percpu_ref_init(&cgrp->self.refcnt, css_release, 0, GFP_KERNEL);
  	if (ret)
  		goto out_free_cgrp;
-@@ -5547,6 +5591,7 @@ out_stat_exit:
+@@ -5547,6 +5591,7 @@ static struct cgroup *cgroup_create(struct cgroup *parent, const char *name,
  out_cancel_ref:
  	percpu_ref_exit(&cgrp->self.refcnt);
  out_free_cgrp:
@@ -874,7 +877,7 @@ index b0566af..02d3c58 100644
  	WARN_ON(sysfs_create_mount_point(fs_kobj, "cgroup"));
  	WARN_ON(register_filesystem(&cgroup_fs_type));
 diff --git a/kernel/cgroup/debug.c b/kernel/cgroup/debug.c
-index 80aa3f0..a86d075 100644
+index 80aa3f027..a86d07500 100644
 --- a/kernel/cgroup/debug.c
 +++ b/kernel/cgroup/debug.c
 @@ -61,7 +61,7 @@ static int current_css_set_read(struct seq_file *seq, void *v)
@@ -896,7 +899,7 @@ index 80aa3f0..a86d075 100644
  			continue;
  
 diff --git a/kernel/cgroup/pids.c b/kernel/cgroup/pids.c
-index 511af87..feaf1b0 100644
+index 511af87f6..feaf1b05e 100644
 --- a/kernel/cgroup/pids.c
 +++ b/kernel/cgroup/pids.c
 @@ -222,7 +222,7 @@ static int pids_can_fork(struct task_struct *task, struct css_set *cset)
@@ -918,7 +921,7 @@ index 511af87..feaf1b0 100644
  		css = task_css_check(current, pids_cgrp_id, true);
  	pids = css_pids(css);
 diff --git a/kernel/events/core.c b/kernel/events/core.c
-index 5e8cd2c..9cffe65 100644
+index 5e8cd2c6a..9cffe65d2 100644
 --- a/kernel/events/core.c
 +++ b/kernel/events/core.c
 @@ -681,8 +681,15 @@ perf_cgroup_match(struct perf_event *event)
@@ -1079,3 +1082,6 @@ index 5e8cd2c..9cffe65 100644
  	}
  #endif
  
+-- 
+2.43.0
+

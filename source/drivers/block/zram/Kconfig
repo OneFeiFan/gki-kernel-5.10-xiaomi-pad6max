@@ -96,3 +96,24 @@ config ZRAM_MEMORY_TRACKING
 	  /sys/kernel/debug/zram/zramX/block_state.
 
 	  See Documentation/admin-guide/blockdev/zram.rst for more information.
+
+config MI_MEMORY_FREEZE
+	bool "Xiaomi memory freeze writeback policy for zram"
+	depends on ZRAM_WRITEBACK && MEMCG
+	help
+	  Pages of memory cgroups marked through memory.anno_writeback_enable
+	  (or anno_writeback_control = 2) are tagged when they enter zram.
+	  They may use the backing space reserved by mfz_disk_quota, and
+	  "writeback idle <max> <idle_min> 1" writes back only those pages.
+	  Adds mfz_enable, mfz_disk_quota, mfz_compr_data_size, mfz_idle_stat
+	  and three memory-freeze columns in bd_stat.
+
+config MIUI_ZRAM_MEMORY_TRACKING
+	bool "Track zRam stats"
+	depends on ZRAM
+	help
+	  With this feature, admin can track the state of zram
+	  of zRAM. Admin could see the information via
+	  /sys/block/zramX/.
+
+	  See Documentation/blockdev/zram.txt for more information.

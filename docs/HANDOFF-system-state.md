@@ -16,7 +16,7 @@
 | 内存 | 约 15.9GB |
 | CPU | 8 核，小核 2.016GHz，中核 2.7456GHz，大核 3.1872GHz，`walt` |
 | 启动槽 | `_a`，bootloader 已解锁，SELinux Enforcing |
-| 当前内核 | `5.10.272-android12-9-gd1ee54224e22`（r5，2026-10-31） |
+| 当前内核 | `5.10.272-android12-9-g59cde2a4dfab`（r6，2026-10-31） |
 
 两个容易踩的点：
 
@@ -31,14 +31,44 @@
 | 项目 | 值 |
 |---|---|
 | 源码 | `~/kernel-sources/vanilla-root/common` |
-| 分支 | `p0-series-273`（旧 `p0-series` 保留） |
-| HEAD | `d1ee54224`（26 个功能补丁） |
-| 构建输出 | `~/kernel-sources/out-8059` |
-| 补丁 | 26 个，基线 `8059ae2`，源码树 `146fd5e7b5` |
-| 镜像 | r5 只在本地（未发布）；最后发布的是 r3 |
-| 灰度 | `WQ_POWER_EFFICIENT_DEFAULT=y`；zram writeback（ExtM A 探针）；Kcompressd（默认启用）；cpuidle governor 默认跟随系统（yudi-tweaks 1.6 可切 TEO） |
+| 分支 | `p0-series-xiaomi`（`p0-series-273` 保留通用 26 补丁） |
+| HEAD | `59cde2a4d`（29 个功能补丁） |
+| 构建输出 | `~/kernel-sources/out-xiaomi` |
+| 补丁 | 29 个（通用 26 + 小米 3），基线 `8059ae2`，源码树 `2afd8cc8` |
+| 镜像 | r6 只在本地（未发布）；最后发布的是 r3；SHA256 见下 |
+| 灰度 | `WQ_POWER_EFFICIENT_DEFAULT=y`；ExtM/mfz 已落地（0027/0028/0029）；Kcompressd（默认启用）；cpuidle governor 默认跟随系统（yudi-tweaks 1.8 可切 TEO） |
 | GitHub | `OneFeiFan/gki-kernel-5.10-xiaomi-pad6max`，`pad6max` 快照分支 |
-| 模块 | yudi-tweaks 1.6（含 cpuidle governor 开关）；ntsync 1.1 |
+| 模块 | yudi-tweaks 1.8；ntsync 1.1 |
+
+## ExtM 与内存冻结（mfz）
+
+- 0027 把 zram 换成小米 ExtM 写回实现；0028 加 mfz 策略；0029 修复 memcg 文件注册位置
+  （原补丁把 `cgroup_add_legacy_cftypes()` 放在 `zram_init()` 的 `return 0` 之后）。
+- 设备实测：zram 内建，`comp_algorithm` 为 `[lz4kd]`，`backing_dev` 为
+  `/dev/block/dm-48`；`/sys/block/zram0` 出现 `mfz_enable`、`mfz_disk_quota`、
+  `mfz_compr_data_size`、`mfz_idle_stat`、`bd_stat`。
+- `freeze-app/memory.anno_writeback_enable=2`（init.rc 写 1，驱动按 5.10 接口存 2）；
+  `mfz_enable=0`、`mfz_disk_quota=524288`，由 ROM 的 PerfInit 决定是否启用。
+- mfz 计数实测：测试进程在 `freeze-app` 换出 512MB 后 `mfz_compr_data_size` 为
+  2,871,990 字节；进程退出后回到约 0。按 memcg 打标和计数路径正常。
+- 冻结侧（2026-10-31 实测后已恢复原状）：本 ROM 的 cgroup2 只绑了 `pids`，而
+  `cgroups.json` 把 freezer 声明在 cgroup2（`cgroup.freeze`），system_server
+  初始化失败，日志 `Freezer disabled`，每次开机把 `cached_apps_freezer` 改回
+  `disabled`，`am freeze` 空指针。cgroup v1 freezer 可以手动挂载
+  `/sys/fs/cgroup/freezer` 并工作（tick 测试冻结 10 秒无输出，解冻恢复），但第三方
+  v1 冻结不会把进程搬进 `freeze-app`，mfz 不参与。Millet 的
+  `persist.sys.millet.cgroup=true` 会 tmpfs 覆盖 `/sys/fs/cgroup`，与 Android 16 的
+  pids 布局冲突，运行中开启会导致系统服务崩溃，不要直接开。
+- 未保留任何测试改动：模块 `post-fs-data.sh` 已还原，freezer 挂载和
+  `/data/local/tmp` 测试程序已删除。
+
+## r6 镜像（本地）
+
+```
+a05392feeedf29c6f5e1b543310d55c2792dc897bb3685e5d8d004ee77c7a79e  Image
+3c07c7b79efbcfe6d71d0ac174df40ce0f3e44b46ea19e01780ff48fc2cdc0c8  yudi-5.10.272-20261031-r6-ksu.img
+c241d5fe6056e401dcdd28a6f34beb9cc2a8150c1928ac1121005b549a2ed2aa  yudi-5.10.272-20261031-r6-noroot.img
+```
 
 ## 驱动分层
 
@@ -46,7 +76,7 @@ GKI 内核里没有 `CONFIG_DRM_MSM` 和 `CONFIG_MSM_KGSL`，显示和 GPU 驱�
 vendor 模块提供：
 
 - 模块目录 `/vendor_dlkm/lib/modules`，设备上 315 个 `.ko`
-- 加载模块 420 个
+- 加载模块 417 个（r6）
 - GPU 相关：`msm_kgsl.ko`、`msm_drm.ko`、`msm_performance.ko`、`qcom_dcvs`、
   `gpucc_waipio/diwali`、`llcc_qcom`、`mem_buf_dev`、`secure_buffer`、
   `qcom_iommu_util`、`arm_smmu`

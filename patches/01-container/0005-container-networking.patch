@@ -1,7 +1,10 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 4ea0b626d08086ba0c6c396c24f26acb6981ac72 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:55 +0800
 Subject: [PATCH] net: enable ABI-safe container networking
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Enable nftables, bridge netfilter, IPv6 NAT, IPVS, SCTP, VXLAN/VLAN/IPVLAN/MACVLAN, L2TP, FOU, GRE and tc. The added namespace and device state lives in the KABI reserves or existing holes, and the fields are hidden from genksyms.
 
@@ -19,8 +22,8 @@ KABI: netns_ipv4 ANDROID_KABI_RESERVE(1)；__GENKSYMS__ 守卫
 Depends-On: none
 Tested-On: yudi 5.10.272, 2026-10-29
 ---
- arch/arm64/configs/gki_defconfig            | 143 ++++++++++++++++
- include/linux/netdevice.h                   |  29 +++-
+ arch/arm64/configs/gki_defconfig            | 127 +++++++++++++++
+ include/linux/netdevice.h                   |  28 +++-
  include/linux/netfilter.h                   |   2 +-
  include/linux/skbuff.h                      |  11 +-
  include/net/net_namespace.h                 |  34 ++--
@@ -50,16 +53,17 @@ Tested-On: yudi 5.10.272, 2026-10-29
  net/sctp/socket.c                           |  60 +++----
  net/sctp/sysctl.c                           | 121 +++++++-------
  net/sctp/transport.c                        |  10 +-
- 31 files changed, 525 insertions(+), 255 deletions(-)
+ 31 files changed, 508 insertions(+), 255 deletions(-)
 
 diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index 7611835..b3a9c02 100644
+index 5496677b0..27c19afd9 100644
 --- a/arch/arm64/configs/gki_defconfig
 +++ b/arch/arm64/configs/gki_defconfig
-@@ -704,11 +704,154 @@ CONFIG_POSIX_MQUEUE=y
- CONFIG_IPC_NS=y
- CONFIG_USER_NS=y
- CONFIG_DEVTMPFS=y
+@@ -218,6 +218,133 @@ CONFIG_NETFILTER_XT_MATCH_STATISTIC=y
+ CONFIG_NETFILTER_XT_MATCH_STRING=y
+ CONFIG_NETFILTER_XT_MATCH_TIME=y
+ CONFIG_NETFILTER_XT_MATCH_U32=y
++# yudi: container networking: nftables, bridge netfilter, IPv6 NAT, IPVS, SCTP, tunnels, tc
 +CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
 +CONFIG_NETFILTER_XT_TARGET_LOG=y
 +CONFIG_NETFILTER_XT_MATCH_RECENT=y
@@ -67,17 +71,6 @@ index 7611835..b3a9c02 100644
 +CONFIG_IP_SET_HASH_IP=y
 +CONFIG_IP_SET_HASH_NET=y
 +CONFIG_NETFILTER_XT_SET=y
- CONFIG_CGROUP_DEVICE=y
- CONFIG_CGROUP_PIDS=y
- # CGROUP_PERF keeps the stock KMI via the cgrp split in linux/perf_event.h.
- CONFIG_CGROUP_PERF=y
- CONFIG_CGROUP_NET_CLASSID=y
-+# nftables (Docker requires NF_TABLES; NFT_* is the reference "full set").
-+# Deferred to phase 4 (bridge): NF_TABLES_BRIDGE selects
-+# NETFILTER_FAMILY_BRIDGE, which adds hooks_bridge[5] to struct netns_nf
-+# (+40 bytes) and changes the struct net layout.
-+# Disabled on purpose: CONFIG_NFT_FLOW_OFFLOAD (selects NF_FLOW_TABLE, which
-+# adds struct netns_ft to struct net; not needed for Docker).
 +CONFIG_NF_TABLES=y
 +CONFIG_NF_TABLES_INET=y
 +CONFIG_NF_TABLES_NETDEV=y
@@ -117,9 +110,6 @@ index 7611835..b3a9c02 100644
 +CONFIG_NFT_REJECT_INET=y
 +CONFIG_NFT_REJECT_IPV4=y
 +CONFIG_NFT_REJECT_IPV6=y
- # Phase 4: bridge netfilter + IPv6 NAT.  Ebtables and VLAN filtering are
-+# deferred (ebtables needs 3 pointers in struct netns_xt; VLAN filtering
-+# depends on VLAN_8021Q which arrives in phase 6).
 +CONFIG_BRIDGE_NETFILTER=y
 +CONFIG_NF_CONNTRACK_BRIDGE=y
 +CONFIG_NF_TABLES_BRIDGE=y
@@ -127,7 +117,6 @@ index 7611835..b3a9c02 100644
 +CONFIG_NFT_BRIDGE_REJECT=y
 +CONFIG_IP6_NF_NAT=y
 +CONFIG_IP6_NF_TARGET_MASQUERADE=y
- # Phase 5: IPVS + SCTP.  IP_VS_TWOS does not exist in 5.10 (added later).
 +CONFIG_IP_VS=y
 +CONFIG_IP_VS_IPV6=y
 +CONFIG_IP_VS_PROTO_TCP=y
@@ -153,14 +142,6 @@ index 7611835..b3a9c02 100644
 +CONFIG_IP_VS_PE_SIP=y
 +CONFIG_NETFILTER_XT_MATCH_IPVS=y
 +CONFIG_IP_SCTP=y
- # Phase 6: tunnels / virtual NICs / tc.
-+# Skipped on purpose: NET_CLS_ROUTE4 (selects IP_ROUTE_CLASSID, grows
-+# netns_ipv4), MPLS_IPTUNNEL (needs MPLS, grows struct net),
-+# IPV6_IOAM6_LWTUNNEL (not in 5.10).
-+# ABI: vlan_info overlays struct net_device KABI reserve 2; l3mdev_ops
-+# (IPVLAN selects IPVLAN_L3S -> NET_L3_MASTER_DEV) overlays reserve 1;
-+# the three l3mdev sysctls fill the 32-byte alignment hole in
-+# netns_ipv4 before tcp_death_row.
 +CONFIG_VLAN_8021Q=y
 +CONFIG_BRIDGE_VLAN_FILTERING=y
 +CONFIG_IPVLAN=y
@@ -208,11 +189,12 @@ index 7611835..b3a9c02 100644
 +CONFIG_NET_SCH_ETS=y
 +CONFIG_NET_SCH_DEFAULT=y
 +CONFIG_NET_SCH_FQ_PIE=y
-+
-+# Phase 7: block throttle, net classifier, checkpoint, Btrfs.
 +CONFIG_NET_CLS_CGROUP=y
+ CONFIG_IP_NF_IPTABLES=y
+ CONFIG_IP_NF_MATCH_ECN=y
+ CONFIG_IP_NF_MATCH_TTL=y
 diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
-index 3d61f68..721dd79 100644
+index 3d61f6887..c1f54996a 100644
 --- a/include/linux/netdevice.h
 +++ b/include/linux/netdevice.h
 @@ -1975,9 +1975,6 @@ struct net_device {
@@ -235,15 +217,7 @@ index 3d61f68..721dd79 100644
  #if IS_ENABLED(CONFIG_NET_DSA)
  	struct dsa_port		*dsa_ptr;
  #endif
-@@ -2188,6 +2182,7 @@ struct net_device {
- 
- 	/* for setting kernel sock attribute on TCP connection setup */
- #define GSO_MAX_SIZE		65536
-+#define GSO_LEGACY_MAX_SIZE	65536u
- 	unsigned int		gso_max_size;
- #define GSO_MAX_SEGS		65535
- 	u16			gso_max_segs;
-@@ -2224,8 +2219,30 @@ struct net_device {
+@@ -2224,8 +2218,30 @@ struct net_device {
  	/* protected by rtnl_lock */
  	struct bpf_xdp_entity	xdp_state[__MAX_XDP_MODE];
  
@@ -275,7 +249,7 @@ index 3d61f68..721dd79 100644
  	ANDROID_KABI_RESERVE(4);
  	ANDROID_KABI_RESERVE(5);
 diff --git a/include/linux/netfilter.h b/include/linux/netfilter.h
-index 819aace..99ea098 100644
+index 819aacebf..99ea09807 100644
 --- a/include/linux/netfilter.h
 +++ b/include/linux/netfilter.h
 @@ -237,7 +237,7 @@ static inline int nf_hook(u_int8_t pf, unsigned int hook, struct net *net,
@@ -288,7 +262,7 @@ index 819aace..99ea098 100644
  		break;
  	default:
 diff --git a/include/linux/skbuff.h b/include/linux/skbuff.h
-index 0bf4cee..90851e3 100644
+index 0bf4ceead..90851e3dc 100644
 --- a/include/linux/skbuff.h
 +++ b/include/linux/skbuff.h
 @@ -4260,9 +4260,6 @@ static inline void skb_set_nfct(struct sk_buff *skb, unsigned long nfct)
@@ -317,7 +291,7 @@ index 0bf4cee..90851e3 100644
  	SKB_EXT_NUM, /* must be last */
  };
 diff --git a/include/net/net_namespace.h b/include/net/net_namespace.h
-index 82cfc50..81a43d9 100644
+index 82cfc5006..81a43d960 100644
 --- a/include/net/net_namespace.h
 +++ b/include/net/net_namespace.h
 @@ -123,6 +123,23 @@ struct net {
@@ -390,7 +364,7 @@ index 82cfc50..81a43d9 100644
  
  /* Init's network namespace */
 diff --git a/include/net/netfilter/nf_conntrack_extend.h b/include/net/netfilter/nf_conntrack_extend.h
-index e1e5883..b93d406 100644
+index e1e588387..b93d4068e 100644
 --- a/include/net/netfilter/nf_conntrack_extend.h
 +++ b/include/net/netfilter/nf_conntrack_extend.h
 @@ -25,7 +25,13 @@ enum nf_ct_ext_id {
@@ -409,7 +383,7 @@ index e1e5883..b93d406 100644
  #endif
  	NF_CT_EXT_NUM,
 diff --git a/include/net/netfilter/nf_queue.h b/include/net/netfilter/nf_queue.h
-index 779327e..2ac48b4 100644
+index 779327e95..2ac48b42f 100644
 --- a/include/net/netfilter/nf_queue.h
 +++ b/include/net/netfilter/nf_queue.h
 @@ -14,7 +14,11 @@ struct nf_queue_entry {
@@ -426,7 +400,7 @@ index 779327e..2ac48b4 100644
  	struct net_device	*physin;
  	struct net_device	*physout;
 diff --git a/include/net/netns/ipv4.h b/include/net/netns/ipv4.h
-index fb94551..b240834 100644
+index fb94551d0..b240834e8 100644
 --- a/include/net/netns/ipv4.h
 +++ b/include/net/netns/ipv4.h
 @@ -11,6 +11,8 @@
@@ -501,7 +475,7 @@ index fb94551..b240834 100644
 +#endif
  #endif
 diff --git a/include/net/netns/netfilter.h b/include/net/netns/netfilter.h
-index 6ec6887..5fa5207 100644
+index 6ec6887ee..5fa5207d8 100644
 --- a/include/net/netns/netfilter.h
 +++ b/include/net/netns/netfilter.h
 @@ -9,6 +9,16 @@ struct proc_dir_entry;
@@ -551,7 +525,7 @@ index 6ec6887..5fa5207 100644
  };
  #endif
 diff --git a/include/net/netns/sctp.h b/include/net/netns/sctp.h
-index d8d02e4..4e745bd 100644
+index d8d02e418..4e745bd5b 100644
 --- a/include/net/netns/sctp.h
 +++ b/include/net/netns/sctp.h
 @@ -161,6 +161,9 @@ struct netns_sctp {
@@ -565,7 +539,7 @@ index d8d02e4..4e745bd 100644
  
  #endif /* __NETNS_SCTP_H__ */
 diff --git a/include/net/sctp/sctp.h b/include/net/sctp/sctp.h
-index f517189..77f689d 100644
+index f517189b4..77f689dc0 100644
 --- a/include/net/sctp/sctp.h
 +++ b/include/net/sctp/sctp.h
 @@ -206,9 +206,9 @@ extern int sysctl_sctp_wmem[3];
@@ -582,7 +556,7 @@ index f517189..77f689d 100644
  /* sctp mib definitions */
  enum {
 diff --git a/net/bridge/br_input.c b/net/bridge/br_input.c
-index 10819e3..7482ef3 100644
+index 10819e35f..7482ef331 100644
 --- a/net/bridge/br_input.c
 +++ b/net/bridge/br_input.c
 @@ -223,7 +223,7 @@ static int nf_hook_bridge_pre(struct sk_buff *skb, struct sk_buff **pskb)
@@ -595,7 +569,7 @@ index 10819e3..7482ef3 100644
  		goto frame_finish;
  
 diff --git a/net/bridge/br_netfilter_hooks.c b/net/bridge/br_netfilter_hooks.c
-index 4f867ac..8576fde 100644
+index 4f867aca6..8576fde64 100644
 --- a/net/bridge/br_netfilter_hooks.c
 +++ b/net/bridge/br_netfilter_hooks.c
 @@ -1020,7 +1020,7 @@ int br_nf_hook_thresh(unsigned int hook, struct net *net,
@@ -608,7 +582,7 @@ index 4f867ac..8576fde 100644
  		return okfn(net, sk, skb);
  
 diff --git a/net/netfilter/core.c b/net/netfilter/core.c
-index d0c7c39..ddc98e8 100644
+index d0c7c396b..ddc98e895 100644
 --- a/net/netfilter/core.c
 +++ b/net/netfilter/core.c
 @@ -278,9 +278,9 @@ nf_hook_entry_head(struct net *net, int pf, unsigned int hooknum,
@@ -673,7 +647,7 @@ index d0c7c39..ddc98e8 100644
  }
  
 diff --git a/net/netfilter/ipvs/ip_vs_core.c b/net/netfilter/ipvs/ip_vs_core.c
-index a49dd1a..9562bec 100644
+index a49dd1a2e..9562bec79 100644
 --- a/net/netfilter/ipvs/ip_vs_core.c
 +++ b/net/netfilter/ipvs/ip_vs_core.c
 @@ -2421,6 +2421,10 @@ static int __net_init __ip_vs_init(struct net *net)
@@ -688,7 +662,7 @@ index a49dd1a..9562bec 100644
  	if (ipvs == NULL)
  		return -ENOMEM;
 diff --git a/net/netfilter/nf_queue.c b/net/netfilter/nf_queue.c
-index 0fa3d9d..adc2971 100644
+index 0fa3d9d54..adc297164 100644
 --- a/net/netfilter/nf_queue.c
 +++ b/net/netfilter/nf_queue.c
 @@ -298,7 +298,7 @@ static struct nf_hook_entries *nf_hook_entries_head(const struct net *net, u8 pf
@@ -701,7 +675,7 @@ index 0fa3d9d..adc2971 100644
  	case NFPROTO_IPV4:
  		return rcu_dereference(net->nf.hooks_ipv4[hooknum]);
 diff --git a/net/netfilter/nf_tables_api.c b/net/netfilter/nf_tables_api.c
-index 63592c7..eabd632 100644
+index 63592c73a..eabd63267 100644
 --- a/net/netfilter/nf_tables_api.c
 +++ b/net/netfilter/nf_tables_api.c
 @@ -9716,6 +9716,12 @@ static int __net_init nf_tables_init_net(struct net *net)
@@ -718,7 +692,7 @@ index 63592c7..eabd632 100644
  	INIT_LIST_HEAD(&nft_net->commit_list);
  	INIT_LIST_HEAD(&nft_net->binding_list);
 diff --git a/net/sctp/associola.c b/net/sctp/associola.c
-index ad1a736..af54f80 100644
+index ad1a7368f..af54f80fd 100644
 --- a/net/sctp/associola.c
 +++ b/net/sctp/associola.c
 @@ -1460,7 +1460,7 @@ static inline bool sctp_peer_needs_update(struct sctp_association *asoc)
@@ -731,7 +705,7 @@ index ad1a736..af54f80 100644
  			return true;
  		break;
 diff --git a/net/sctp/bind_addr.c b/net/sctp/bind_addr.c
-index 6b95d3b..436d397 100644
+index 6b95d3ba8..436d39772 100644
 --- a/net/sctp/bind_addr.c
 +++ b/net/sctp/bind_addr.c
 @@ -521,7 +521,7 @@ int sctp_in_scope(struct net *net, const union sctp_addr *addr,
@@ -744,7 +718,7 @@ index 6b95d3b..436d397 100644
  		return 1;
  	case SCTP_SCOPE_POLICY_ENABLE:
 diff --git a/net/sctp/endpointola.c b/net/sctp/endpointola.c
-index efffde7..1c5d54c 100644
+index efffde7f2..1c5d54c89 100644
 --- a/net/sctp/endpointola.c
 +++ b/net/sctp/endpointola.c
 @@ -49,8 +49,8 @@ static struct sctp_endpoint *sctp_endpoint_init(struct sctp_endpoint *ep,
@@ -789,7 +763,7 @@ index efffde7..1c5d54c 100644
  	/* Remember who we are attached to.  */
  	ep->base.sk = sk;
 diff --git a/net/sctp/input.c b/net/sctp/input.c
-index 731d12e..7fa346d 100644
+index 731d12e80..7fa346dbf 100644
 --- a/net/sctp/input.c
 +++ b/net/sctp/input.c
 @@ -180,7 +180,7 @@ int sctp_rcv(struct sk_buff *skb)
@@ -820,7 +794,7 @@ index 731d12e..7fa346d 100644
  						net, ch, laddr,
  						sctp_hdr(skb)->source,
 diff --git a/net/sctp/ipv6.c b/net/sctp/ipv6.c
-index d56e4bd..e9a639c 100644
+index d56e4bdaa..e9a639c8a 100644
 --- a/net/sctp/ipv6.c
 +++ b/net/sctp/ipv6.c
 @@ -88,16 +88,16 @@ static int sctp_inet6addr_event(struct notifier_block *this, unsigned long ev,
@@ -855,7 +829,7 @@ index d56e4bd..e9a639c 100644
  			kfree_rcu(addr, rcu);
  		break;
 diff --git a/net/sctp/objcnt.c b/net/sctp/objcnt.c
-index 0400c96..65a28b6 100644
+index 0400c964e..65a28b641 100644
 --- a/net/sctp/objcnt.c
 +++ b/net/sctp/objcnt.c
 @@ -99,7 +99,7 @@ void sctp_dbg_objcnt_init(struct net *net)
@@ -868,7 +842,7 @@ index 0400c96..65a28b6 100644
  		pr_warn("sctp_dbg_objcnt: Unable to create /proc entry.\n");
  }
 diff --git a/net/sctp/proc.c b/net/sctp/proc.c
-index ec00ee7..f4d0fff 100644
+index ec00ee75d..f4d0fff34 100644
 --- a/net/sctp/proc.c
 +++ b/net/sctp/proc.c
 @@ -65,7 +65,7 @@ static int sctp_snmp_seq_show(struct seq_file *seq, void *v)
@@ -914,7 +888,7 @@ index ec00ee7..f4d0fff 100644
  	return -ENOMEM;
  }
 diff --git a/net/sctp/protocol.c b/net/sctp/protocol.c
-index 5305a5b..cfc5e80 100644
+index 5305a5be7..cfc5e80b1 100644
 --- a/net/sctp/protocol.c
 +++ b/net/sctp/protocol.c
 @@ -109,7 +109,7 @@ static void sctp_get_local_addr_list(struct net *net)
@@ -980,7 +954,7 @@ index 5305a5b..cfc5e80 100644
  			struct sock *sk;
  
  			sk = sctp_opt2sk(sp);
-@@ -679,7 +680,7 @@ free_next:
+@@ -679,7 +680,7 @@ static void sctp_addr_wq_timeout_handler(struct timer_list *t)
  		list_del(&addrw->list);
  		kfree(addrw);
  	}
@@ -1289,7 +1263,7 @@ index 5305a5b..cfc5e80 100644
  
  	return 0;
  
-@@ -1325,6 +1335,8 @@ err_init_proc:
+@@ -1325,6 +1335,8 @@ static int __net_init sctp_defaults_init(struct net *net)
  	cleanup_sctp_mibs(net);
  #endif
  err_init_mibs:
@@ -1335,7 +1309,7 @@ index 5305a5b..cfc5e80 100644
  
  static struct pernet_operations sctp_ctrlsock_ops = {
 diff --git a/net/sctp/sm_make_chunk.c b/net/sctp/sm_make_chunk.c
-index 3425554..07cd816 100644
+index 342555493..07cd816f8 100644
 --- a/net/sctp/sm_make_chunk.c
 +++ b/net/sctp/sm_make_chunk.c
 @@ -1993,7 +1993,7 @@ static int sctp_verify_ext_param(struct net *net,
@@ -1356,7 +1330,7 @@ index 3425554..07cd816 100644
  	    (asoc->peer.asconf_capable && !asoc->peer.auth_capable)) {
  		asoc->peer.addip_disabled_mask |= (SCTP_PARAM_ADD_IP |
  						  SCTP_PARAM_DEL_IP |
-@@ -2542,7 +2542,7 @@ do_addr_param:
+@@ -2542,7 +2542,7 @@ static int sctp_process_param(struct sctp_association *asoc,
  		break;
  
  	case SCTP_PARAM_COOKIE_PRESERVATIVE:
@@ -1366,7 +1340,7 @@ index 3425554..07cd816 100644
  
  		stale = ntohl(param.life->lifespan_increment);
 diff --git a/net/sctp/sm_sideeffect.c b/net/sctp/sm_sideeffect.c
-index 9ad5dd2..84bc3c7 100644
+index 9ad5dd283..84bc3c704 100644
 --- a/net/sctp/sm_sideeffect.c
 +++ b/net/sctp/sm_sideeffect.c
 @@ -546,7 +546,7 @@ static void sctp_do_8_2_transport_strike(struct sctp_cmd_seq *commands,
@@ -1379,7 +1353,7 @@ index 9ad5dd2..84bc3c7 100644
  	    transport->error_count < transport->pathmaxrxt &&
  	    transport->error_count > transport->pf_retrans) {
 diff --git a/net/sctp/sm_statefuns.c b/net/sctp/sm_statefuns.c
-index 759e739..ecbcfee 100644
+index 759e73919..ecbcfee71 100644
 --- a/net/sctp/sm_statefuns.c
 +++ b/net/sctp/sm_statefuns.c
 @@ -349,7 +349,7 @@ enum sctp_disposition sctp_sf_do_5_1B_init(struct net *net,
@@ -1455,7 +1429,7 @@ index 759e739..ecbcfee 100644
  	packet = &transport->packet;
  	sctp_packet_init(packet, transport, sport, dport);
 diff --git a/net/sctp/socket.c b/net/sctp/socket.c
-index fed9b4f..99d7b7a 100644
+index fed9b4fc0..99d7b7a1f 100644
 --- a/net/sctp/socket.c
 +++ b/net/sctp/socket.c
 @@ -362,10 +362,10 @@ static void sctp_auto_asconf_init(struct sctp_sock *sp)
@@ -1623,7 +1597,7 @@ index fed9b4f..99d7b7a 100644
  	 */
  	if (oldsp->ep->auth_hmacs) {
 diff --git a/net/sctp/sysctl.c b/net/sctp/sysctl.c
-index 6f3afa7..ee5807d 100644
+index 6f3afa763..ee5807df6 100644
 --- a/net/sctp/sysctl.c
 +++ b/net/sctp/sysctl.c
 @@ -89,46 +89,48 @@ static struct ctl_table sctp_table[] = {
@@ -2066,7 +2040,7 @@ index 6f3afa7..ee5807d 100644
  
  static struct ctl_table_header *sctp_sysctl_header;
 diff --git a/net/sctp/transport.c b/net/sctp/transport.c
-index 9921041..3b7e494 100644
+index 992104107..3b7e49406 100644
 --- a/net/sctp/transport.c
 +++ b/net/sctp/transport.c
 @@ -55,7 +55,7 @@ static struct sctp_transport *sctp_transport_init(struct net *net,
@@ -2103,3 +2077,6 @@ index 9921041..3b7e494 100644
  		if (rto_alpha < 32)
  			tp->srtt = tp->srtt - (tp->srtt >> rto_alpha)
  				+ (rtt >> rto_alpha);
+-- 
+2.43.0
+

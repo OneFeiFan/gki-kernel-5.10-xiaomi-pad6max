@@ -3,6 +3,10 @@
 日期：2026-10-29。只读研究，未修改设备。目标：判断小米内存扩展（ExtM）能不能在
 我们的内建 zram 上恢复，以及需要移植什么。
 
+> 2026-10-31 更新：方案 B 已落地为 0027（ExtM）、0028（mfz）和 0029（memcg 文件
+> 注册修复），进入 `p0-series-xiaomi`（29 补丁，树 `2afd8cc8`），r6 实机验证。
+> 下面保留 2026-10-29 的原始调研记录；实测结果见文末「2026-10-31 实测」。
+
 ## 结论
 
 - ExtM 的写回后端仍然是块设备：`system_perf_init` 把 `/data/extm/extm_file`
@@ -89,3 +93,18 @@ cat /sys/block/zram0/comp_algorithm     # 仍应为 [lz4kd]
 - 本地：`/vendor_dlkm/lib/modules/zram.ko`、`/system_ext/xbin/system_perf_init`、
   `/system_ext/framework/miui-services.jar`
 - 启动日志：`/data/adb/ksu/log/logcat.log`
+
+## 2026-10-31 实测
+
+- zram 内建，`/sys/block/zram0` 出现 `backing_dev`、`bd_stat`、`mfz_*`；
+  `comp_algorithm` 为 `[lz4kd]`，`backing_dev` 为 `/dev/block/dm-48`。
+- `freeze-app/memory.anno_writeback_enable=2`（init.rc 写 1，驱动按 5.10 接口存 2）；
+  `mfz_enable=0`、`mfz_disk_quota=524288`。
+- mfz 计数：把测试进程放进 `freeze-app`，`MADV_PAGEOUT` 换出 512MB 后
+  `mfz_compr_data_size=2,871,990` 字节；进程退出后回到约 0。
+- 冻结侧：cgroup v1 freezer 手动挂载 `/sys/fs/cgroup/freezer` 可用（tick 测试冻结
+  10 秒无输出，解冻恢复）；cgroup2 只有 pids，而 `cgroups.json` 把 freezer 声明在
+  cgroup2，system_server 记 `Freezer disabled` 并把 `cached_apps_freezer` 改回
+  `disabled`，`am freeze` 空指针。第三方 v1 冻结不会把进程搬进 `freeze-app`，
+  mfz 在第三方墓碑下不参与。
+- 测试用的挂载和脚本已移除，未进入模块。

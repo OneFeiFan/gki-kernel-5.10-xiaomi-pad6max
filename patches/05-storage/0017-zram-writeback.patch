@@ -1,0 +1,40 @@
+From 403c279f9c828220ba088f677842bb0378a297fd Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Thu, 29 Oct 2026 22:18:29 +0800
+Subject: [PATCH] config: enable ZRAM_WRITEBACK
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Enable zram writeback to a backing block device. Generic upstream
+feature; on Xiaomi devices PerfInit uses it to attach the ExtM backing
+device (/data/extm/extm_file via dm-linear) before setting the disk
+size, and xiaomi/0027 builds the ExtM writeback logic on top of it.
+
+Origin: 本地配置
+Upstream-Status: Not-Applicable
+KABI: none
+Depends-On: 0016 内建 zram
+Tested-On: yudi 5.10.272（PerfInit 建立写回设备 dm-48）, 2026-10-31
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ arch/arm64/configs/gki_defconfig | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index e1c86a8f5..4b8025a84 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -483,6 +483,8 @@ CONFIG_DM_UEVENT=y
+ CONFIG_DM_VERITY=y
+ CONFIG_DM_VERITY_FEC=y
+ CONFIG_DM_BOW=y
++# yudi: zram writeback (Xiaomi ExtM probe)
++CONFIG_ZRAM_WRITEBACK=y
+ CONFIG_NETDEVICES=y
+ CONFIG_DUMMY=y
+ CONFIG_WIREGUARD=y
+-- 
+2.43.0
+

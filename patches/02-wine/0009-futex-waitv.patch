@@ -1,16 +1,28 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 4adf4732627e2aad030f8dbb70d3454abe4c555d Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] futex: backport futex_waitv
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Backport futex_waitv (64-bit and compat) from upstream and adapt it to 5.10.
 
-Origin: torvalds/linux commit b25472f9b961
+Origin: torvalds/linux bf69bad38cf6（futex: Implement sys_futex_waitv()）+ 94cd8fa09f5f（kcalloc 失败时的 hrtimer 泄漏修复）；32 位 compat 入口为本地添加
 Upstream-Status: Backport
 KABI: none
-Depends-On: None (syscall 449, bumps __NR_syscalls to 450)
+Depends-On: 0008 epoll_pwait2（共享系统调用表；syscall 449，__NR_syscalls 到 450）
 Tested-On: yudi 5.10.272 (futex_waitv_test 7/7)
 ---
+ arch/arm64/include/asm/unistd.h   |   2 +-
+ arch/arm64/include/asm/unistd32.h |   2 +
+ include/linux/syscalls.h          |   5 +
+ include/uapi/asm-generic/unistd.h |   4 +-
+ include/uapi/linux/futex.h        |  25 +++
+ kernel/futex/core.c               | 352 ++++++++++++++++++++++++++++++
+ kernel/sys_ni.c                   |   1 +
+ 7 files changed, 389 insertions(+), 2 deletions(-)
+
 diff --git a/arch/arm64/include/asm/unistd.h b/arch/arm64/include/asm/unistd.h
 index 3cb206aea..6bdb5f5db 100644
 --- a/arch/arm64/include/asm/unistd.h
@@ -488,3 +500,6 @@ index 26dcc264b..26b677d57 100644
  
  /* kernel/hrtimer.c */
  
+-- 
+2.43.0
+

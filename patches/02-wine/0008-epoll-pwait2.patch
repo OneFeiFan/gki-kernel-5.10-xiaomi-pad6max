@@ -1,4 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From e43a5629fbc9bfa97d05eee17ea98a446f6e9e53 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] epoll: backport epoll_pwait2
@@ -12,11 +12,18 @@ KABI: none
 Depends-On: none
 Tested-On: yudi 5.10.272 (epoll_wakeup_test 63/63)
 ---
+ arch/arm64/include/asm/unistd32.h |   2 +
+ fs/eventpoll.c                    | 127 +++++++++++++++++++++++-------
+ include/linux/syscalls.h          |   5 ++
+ include/uapi/asm-generic/unistd.h |   2 +
+ kernel/sys_ni.c                   |   1 +
+ 5 files changed, 110 insertions(+), 27 deletions(-)
+
 diff --git a/arch/arm64/include/asm/unistd32.h b/arch/arm64/include/asm/unistd32.h
-index 7a86933..45b307d 100644
+index 7a869335d..cd8979a48 100644
 --- a/arch/arm64/include/asm/unistd32.h
 +++ b/arch/arm64/include/asm/unistd32.h
-@@ -889,5 +889,7 @@
+@@ -889,6 +889,8 @@ __SYSCALL(__NR_pidfd_getfd, sys_pidfd_getfd)
  __SYSCALL(__NR_faccessat2, sys_faccessat2)
  #define __NR_process_madvise 440
  __SYSCALL(__NR_process_madvise, sys_process_madvise)
@@ -24,8 +31,9 @@ index 7a86933..45b307d 100644
 +__SYSCALL(__NR_epoll_pwait2, compat_sys_epoll_pwait2)
  #define __NR_process_mrelease 448
  __SYSCALL(__NR_process_mrelease, sys_process_mrelease)
+ 
 diff --git a/fs/eventpoll.c b/fs/eventpoll.c
-index 3114ab2..c69d461 100644
+index 3114ab294..c69d46133 100644
 --- a/fs/eventpoll.c
 +++ b/fs/eventpoll.c
 @@ -1806,15 +1806,25 @@ static int ep_send_events(struct eventpoll *ep,
@@ -116,7 +124,7 @@ index 3114ab2..c69d461 100644
  
  error_fput:
  	fdput(f);
-@@ -2382,16 +2390,19 @@ error_fput:
+@@ -2382,16 +2390,19 @@ static int do_epoll_wait(int epfd, struct epoll_event __user *events,
  SYSCALL_DEFINE4(epoll_wait, int, epfd, struct epoll_event __user *, events,
  		int, maxevents, int, timeout)
  {
@@ -235,10 +243,10 @@ index 3114ab2..c69d461 100644
  
  static int __init eventpoll_init(void)
 diff --git a/include/linux/syscalls.h b/include/linux/syscalls.h
-index 478b827..fb30e89 100644
+index 478b827bc..0253556e5 100644
 --- a/include/linux/syscalls.h
 +++ b/include/linux/syscalls.h
-@@ -391,6 +392,11 @@ asmlinkage long sys_epoll_pwait(int epfd, struct epoll_event __user *events,
+@@ -391,6 +391,11 @@ asmlinkage long sys_epoll_pwait(int epfd, struct epoll_event __user *events,
  				int maxevents, int timeout,
  				const sigset_t __user *sigmask,
  				size_t sigsetsize);
@@ -251,10 +259,10 @@ index 478b827..fb30e89 100644
  /* fs/fcntl.c */
  asmlinkage long sys_dup(unsigned int fildes);
 diff --git a/include/uapi/asm-generic/unistd.h b/include/uapi/asm-generic/unistd.h
-index 03fb223..db1f2e9 100644
+index 03fb22304..df218abf2 100644
 --- a/include/uapi/asm-generic/unistd.h
 +++ b/include/uapi/asm-generic/unistd.h
-@@ -859,5 +859,7 @@
+@@ -859,6 +859,8 @@ __SYSCALL(__NR_pidfd_getfd, sys_pidfd_getfd)
  __SYSCALL(__NR_faccessat2, sys_faccessat2)
  #define __NR_process_madvise 440
  __SYSCALL(__NR_process_madvise, sys_process_madvise)
@@ -262,8 +270,9 @@ index 03fb223..db1f2e9 100644
 +__SYSCALL(__NR_epoll_pwait2, sys_epoll_pwait2)
  #define __NR_process_mrelease 448
  __SYSCALL(__NR_process_mrelease, sys_process_mrelease)
+ 
 diff --git a/kernel/sys_ni.c b/kernel/sys_ni.c
-index 8ae2597..26b677d 100644
+index 8ae259772..26dcc264b 100644
 --- a/kernel/sys_ni.c
 +++ b/kernel/sys_ni.c
 @@ -67,6 +67,7 @@ COND_SYSCALL(eventfd2);
@@ -274,3 +283,6 @@ index 8ae2597..26b677d 100644
  COND_SYSCALL_COMPAT(epoll_pwait);
  
  /* fs/fcntl.c */
+-- 
+2.43.0
+

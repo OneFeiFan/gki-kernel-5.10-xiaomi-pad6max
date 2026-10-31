@@ -1,7 +1,10 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From c175e9a7755df237fa31340fbed53b1646409787 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:55 +0800
 Subject: [PATCH] block: overlay block throttling state on the KABI reserve
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 CONFIG_BLK_DEV_THROTTLING needs a throtl_data pointer in struct request_queue. Overlay it on ANDROID_KABI_RESERVE(1) and hide it from genksyms so request_queue keeps its stock CRC.
 
@@ -15,22 +18,25 @@ KABI: request_queue ANDROID_KABI_RESERVE(1)；__GENKSYMS__ 守卫
 Depends-On: none
 Tested-On: yudi 5.10.272, 2026-10-29
 ---
- arch/arm64/configs/gki_defconfig |  1 +
+ arch/arm64/configs/gki_defconfig |  2 ++
  include/linux/blkdev.h           | 19 +++++++++++++++----
- 2 files changed, 16 insertions(+), 4 deletions(-)
+ 2 files changed, 17 insertions(+), 4 deletions(-)
 
 diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index b3a9c02..3622ce1 100644
+index 27c19afd9..0cf694046 100644
 --- a/arch/arm64/configs/gki_defconfig
 +++ b/arch/arm64/configs/gki_defconfig
-@@ -854,4 +854,5 @@ CONFIG_NET_SCH_DEFAULT=y
- CONFIG_NET_SCH_FQ_PIE=y
- 
- # Phase 7: block throttle, net classifier, checkpoint, Btrfs.
+@@ -451,6 +451,8 @@ CONFIG_SCSI_UFS_CRYPTO=y
+ CONFIG_SCSI_UFS_HPB=y
+ CONFIG_MD=y
+ CONFIG_BLK_DEV_DM=y
++# yudi: blkio throttling (state on the request_queue KABI reserve)
 +CONFIG_BLK_DEV_THROTTLING=y
- CONFIG_NET_CLS_CGROUP=y
+ CONFIG_DM_CRYPT=y
+ CONFIG_DM_DEFAULT_KEY=y
+ CONFIG_DM_SNAPSHOT=y
 diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
-index 961bfbf..198142d 100644
+index 961bfbf54..198142db9 100644
 --- a/include/linux/blkdev.h
 +++ b/include/linux/blkdev.h
 @@ -573,10 +573,6 @@ struct request_queue {
@@ -67,3 +73,6 @@ index 961bfbf..198142d 100644
  	ANDROID_KABI_RESERVE(2);
  	ANDROID_KABI_RESERVE(3);
  	ANDROID_KABI_RESERVE(4);
+-- 
+2.43.0
+

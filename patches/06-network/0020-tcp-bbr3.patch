@@ -1,7 +1,10 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From e23202abb4fceca2737f9d33b96826ebcde4a541 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] tcp: add BBRv3 congestion control
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Add the BBRv3 congestion control: the full BBRv3 state machine, the
 PLB hooks, the netlink/ss statistics fields, and the Kconfig entry.
@@ -14,10 +17,37 @@ Origin: WildKernels 5.10 BBRv3 backport, original from Google bbr-v3-2024-02-22-
 Upstream-Status: Backport
 KABI: tcp_sock 的 fast_ack_mode/tlp_orig_data_app_limited 占位受 __GENKSYMS__ 保护
 Depends-On: previous tcp_rate and PLB patches
+Notes: 与来源一致；bbr3 的 cwnd_event 增加空指针/未初始化检查（防 GFP_ATOMIC 分配失败）；GSO_LEGACY_MAX_SIZE 的定义从容器网络补丁移到这里
 Tested-On: yudi 5.10.272（r2 构建与开机）, 2026-10-29
 ---
+ include/linux/netdevice.h      |    1 +
+ include/linux/tcp.h            |    6 +
+ include/net/tcp.h              |   77 ++
+ include/uapi/linux/inet_diag.h |   25 +
+ net/ipv4/Kconfig               |   22 +
+ net/ipv4/Makefile              |    1 +
+ net/ipv4/tcp.c                 |    1 +
+ net/ipv4/tcp_bbr3.c            | 2368 ++++++++++++++++++++++++++++++++
+ net/ipv4/tcp_cong.c            |    1 +
+ net/ipv4/tcp_input.c           |   14 +-
+ net/ipv4/tcp_output.c          |    4 +-
+ 11 files changed, 2518 insertions(+), 2 deletions(-)
+ create mode 100644 net/ipv4/tcp_bbr3.c
+
+diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
+index c1f54996a..721dd79b8 100644
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -2182,6 +2182,7 @@ struct net_device {
+ 
+ 	/* for setting kernel sock attribute on TCP connection setup */
+ #define GSO_MAX_SIZE		65536
++#define GSO_LEGACY_MAX_SIZE	65536u
+ 	unsigned int		gso_max_size;
+ #define GSO_MAX_SEGS		65535
+ 	u16			gso_max_segs;
 diff --git a/include/linux/tcp.h b/include/linux/tcp.h
-index 6d00e1b..0c7ca78 100644
+index 6d00e1b29..0c7ca7899 100644
 --- a/include/linux/tcp.h
 +++ b/include/linux/tcp.h
 @@ -226,7 +226,13 @@ struct tcp_sock {
@@ -35,10 +65,10 @@ index 6d00e1b..0c7ca78 100644
  	u32	chrono_stat[3];	/* Time in jiffies for chrono_stat stats */
  	u8	chrono_type:2,	/* current chronograph type */
 diff --git a/include/net/tcp.h b/include/net/tcp.h
-index cad46ae..9f6125b 100644
+index 95db26619..9f6125b6e 100644
 --- a/include/net/tcp.h
 +++ b/include/net/tcp.h
-@@ -2152,6 +2152,83 @@ extern void tcp_rack_advance(struct tcp_sock *tp, u8 sacked, u32 end_seq,
+@@ -2265,6 +2265,83 @@ void tcp_plb_update_state(const struct sock *sk, struct tcp_plb_state *plb,
  void tcp_plb_check_rehash(struct sock *sk, struct tcp_plb_state *plb);
  void tcp_plb_update_state_upon_rto(struct sock *sk, struct tcp_plb_state *plb);
  
@@ -123,7 +153,7 @@ index cad46ae..9f6125b 100644
  static inline s64 tcp_rto_delta_us(const struct sock *sk)
  {
 diff --git a/include/uapi/linux/inet_diag.h b/include/uapi/linux/inet_diag.h
-index 20ee93f..06f9793 100644
+index 20ee93f0f..06f979332 100644
 --- a/include/uapi/linux/inet_diag.h
 +++ b/include/uapi/linux/inet_diag.h
 @@ -229,6 +229,31 @@ struct tcp_bbr_info {
@@ -159,7 +189,7 @@ index 20ee93f..06f9793 100644
  
  union tcp_cc_info {
 diff --git a/net/ipv4/Kconfig b/net/ipv4/Kconfig
-index 23b0606..fcfa679 100644
+index 23b06063e..fcfa679f3 100644
 --- a/net/ipv4/Kconfig
 +++ b/net/ipv4/Kconfig
 @@ -679,6 +679,24 @@ config TCP_CONG_BBR
@@ -187,10 +217,6 @@ index 23b0606..fcfa679 100644
  choice
  	prompt "Default TCP congestion control"
  	default DEFAULT_CUBIC
-diff --git a/net/ipv4/Kconfig b/net/ipv4/Kconfig
-index 23b0606..fcfa679 100644
---- a/net/ipv4/Kconfig
-+++ b/net/ipv4/Kconfig
 @@ -716,6 +734,9 @@ choice
  	config DEFAULT_BBR
  		bool "BBR" if TCP_CONG_BBR=y
@@ -201,10 +227,6 @@ index 23b0606..fcfa679 100644
  	config DEFAULT_RENO
  		bool "Reno"
  endchoice
-diff --git a/net/ipv4/Kconfig b/net/ipv4/Kconfig
-index 23b0606..fcfa679 100644
---- a/net/ipv4/Kconfig
-+++ b/net/ipv4/Kconfig
 @@ -740,6 +761,7 @@ config DEFAULT_TCP_CONG
  	default "dctcp" if DEFAULT_DCTCP
  	default "cdg" if DEFAULT_CDG
@@ -214,7 +236,7 @@ index 23b0606..fcfa679 100644
  
  config TCP_MD5SIG
 diff --git a/net/ipv4/Makefile b/net/ipv4/Makefile
-index d1c8d4b..6b7a435 100644
+index 880277c9f..6b7a435d3 100644
 --- a/net/ipv4/Makefile
 +++ b/net/ipv4/Makefile
 @@ -47,6 +47,7 @@ obj-$(CONFIG_INET_TCP_DIAG) += tcp_diag.o
@@ -226,7 +248,7 @@ index d1c8d4b..6b7a435 100644
  obj-$(CONFIG_TCP_CONG_CDG) += tcp_cdg.o
  obj-$(CONFIG_TCP_CONG_CUBIC) += tcp_cubic.o
 diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
-index deee564..3947a9a 100644
+index deee564a8..3947a9af9 100644
 --- a/net/ipv4/tcp.c
 +++ b/net/ipv4/tcp.c
 @@ -2868,6 +2868,7 @@ int tcp_disconnect(struct sock *sk, int flags)
@@ -239,7 +261,7 @@ index deee564..3947a9a 100644
  	/* Clean up fastopen related fields */
 diff --git a/net/ipv4/tcp_bbr3.c b/net/ipv4/tcp_bbr3.c
 new file mode 100644
-index 0000000..8280397
+index 000000000..828039719
 --- /dev/null
 +++ b/net/ipv4/tcp_bbr3.c
 @@ -0,0 +1,2368 @@
@@ -2612,7 +2634,7 @@ index 0000000..8280397
 +MODULE_DESCRIPTION("TCP BBR (Bottleneck Bandwidth and RTT)");
 +MODULE_VERSION(__stringify(BBR_VERSION));
 diff --git a/net/ipv4/tcp_cong.c b/net/ipv4/tcp_cong.c
-index db5831e..153ed90 100644
+index db5831e6c..153ed9010 100644
 --- a/net/ipv4/tcp_cong.c
 +++ b/net/ipv4/tcp_cong.c
 @@ -179,6 +179,7 @@ void tcp_init_congestion_control(struct sock *sk)
@@ -2624,7 +2646,7 @@ index db5831e..153ed90 100644
  		icsk->icsk_ca_ops->init(sk);
  	if (tcp_ca_needs_ecn(sk))
 diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
-index 84be657..4384bc5 100644
+index 9e194a932..4384bc5a5 100644
 --- a/net/ipv4/tcp_input.c
 +++ b/net/ipv4/tcp_input.c
 @@ -1083,7 +1083,18 @@ static void tcp_verify_retransmit_hint(struct tcp_sock *tp, struct sk_buff *skb)
@@ -2646,11 +2668,7 @@ index 84be657..4384bc5 100644
  }
  
  void tcp_mark_skb_lost(struct sock *sk, struct sk_buff *skb)
-diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
-index 84be657..4384bc5 100644
---- a/net/ipv4/tcp_input.c
-+++ b/net/ipv4/tcp_input.c
-@@ -5523,13 +5554,14 @@ static void __tcp_ack_snd_check(struct sock *sk, int ofo_possible)
+@@ -5543,13 +5554,14 @@ static void __tcp_ack_snd_check(struct sock *sk, int ofo_possible)
  
  	    /* More than one full frame received... */
  	if (((tp->rcv_nxt - tp->rcv_wup) > inet_csk(sk)->icsk_ack.rcv_mss &&
@@ -2667,10 +2685,10 @@ index 84be657..4384bc5 100644
  	    tcp_in_quickack_mode(sk) ||
  	    /* Protocol state mandates a one-time immediate ACK */
 diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
-index 2c8ed36..e3e2398 100644
+index 7d44482b5..e3e239853 100644
 --- a/net/ipv4/tcp_output.c
 +++ b/net/ipv4/tcp_output.c
-@@ -374,7 +376,8 @@ static void tcp_ecn_send(struct sock *sk, struct sk_buff *skb,
+@@ -376,7 +376,8 @@ static void tcp_ecn_send(struct sock *sk, struct sk_buff *skb,
  				th->cwr = 1;
  				skb_shinfo(skb)->gso_type |= SKB_GSO_TCP_ECN;
  			}
@@ -2680,11 +2698,7 @@ index 2c8ed36..e3e2398 100644
  			/* ACK or retransmitted segment: clear ECT|CE */
  			INET_ECN_dontxmit(sk);
  		}
-diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
-index 2c8ed36..e3e2398 100644
---- a/net/ipv4/tcp_output.c
-+++ b/net/ipv4/tcp_output.c
-@@ -2862,6 +2889,7 @@ void tcp_send_loss_probe(struct sock *sk)
+@@ -2888,6 +2889,7 @@ void tcp_send_loss_probe(struct sock *sk)
  	if (WARN_ON(!skb || !tcp_skb_pcount(skb)))
  		goto rearm_timer;
  
@@ -2692,3 +2706,6 @@ index 2c8ed36..e3e2398 100644
  	if (__tcp_retransmit_skb(sk, skb, 1))
  		goto rearm_timer;
  
+-- 
+2.43.0
+

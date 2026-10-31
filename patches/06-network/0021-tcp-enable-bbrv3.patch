@@ -1,7 +1,10 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From d5b8ebc66ddd76c60e5d4d8e3bf8bf7b61ccce3c Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] config: enable BBRv1 and BBRv3
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Enable TCP_CONG_ADVANCED, BBR (v1) and BBRv3 in gki_defconfig, keeping
 the default congestion control at cubic.
@@ -14,23 +17,27 @@ KABI: none
 Depends-On: previous three patches
 Tested-On: yudi 5.10.272（r2 构建与开机）, 2026-10-29
 ---
+ arch/arm64/configs/gki_defconfig | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
 diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
-index 792ab14..9e6e133 100644
+index b4ec5b51a..55c2dc89f 100644
 --- a/arch/arm64/configs/gki_defconfig
 +++ b/arch/arm64/configs/gki_defconfig
-@@ -874,3 +874,15 @@ CONFIG_CRYPTO_LZ4K=y
- CONFIG_CRYPTO_LZ4KD=y
- CONFIG_CRYPTO_842=y
- CONFIG_CRYPTO_LZ4K_OPLUS=y
-+
-+# Phase 10.5: BBRv1, KSM, tmpfs xattrs.
+@@ -160,6 +160,13 @@ CONFIG_NET_IPVTI=y
+ CONFIG_INET_ESP=y
+ CONFIG_INET_UDP_DIAG=y
+ CONFIG_INET_DIAG_DESTROY=y
++# yudi: TCP congestion control: BBRv1 and BBRv3 (default stays cubic)
 +CONFIG_TCP_CONG_ADVANCED=y
 +CONFIG_TCP_CONG_BBR=y
-+
-+# Keep only cubic and BBR when TCP_CONG_ADVANCED is on.
 +# CONFIG_TCP_CONG_BIC is not set
 +# CONFIG_TCP_CONG_WESTWOOD is not set
 +# CONFIG_TCP_CONG_HTCP is not set
-+
-+# Phase 10.6: BBRv3.
 +CONFIG_TCP_CONG_BBR3=y
+ CONFIG_IPV6_ROUTER_PREF=y
+ CONFIG_IPV6_ROUTE_INFO=y
+ CONFIG_IPV6_OPTIMISTIC_DAD=y
+-- 
+2.43.0
+

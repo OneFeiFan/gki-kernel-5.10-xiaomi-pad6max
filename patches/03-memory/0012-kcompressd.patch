@@ -1,4 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From c5c9d0a760cb6e263a861d2efe3e42d9fdf79c15 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Fri, 30 Oct 2026 21:23:40 +0800
 Subject: [PATCH] mm: add Kcompressd for asynchronous swap compression
@@ -290,5 +290,5 @@ index c288f7d02..8b80e67e6 100644
  }
  
 -- 
-2.34.1
+2.43.0
 
