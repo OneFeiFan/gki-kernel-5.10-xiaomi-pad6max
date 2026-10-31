@@ -1,0 +1,51 @@
+From 49f18368736914235fa133bd267ff92e93b6d35c Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Sat, 31 Oct 2026 08:23:00 +0000
+Subject: [PATCH] zram: default mfz_enable to 1 like Xiaomi's driver
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Xiaomi's zram enables memory freeze by default: zram_add() in the 6.6
+source sets mfz_enable = 1 and mfz_disk_quota = 0, and the official
+yudi zram.ko does the same (zram_add stores 1 to the field that
+mfz_enable_show reads). PerfInit relies on that: it only writes 0 to
+mfz_enable when persist.sys.mfz.enable is false, and otherwise just
+writes mfz_disk_quota (persist.sys.mfz.disk_quota, default 2048 MB =
+524288 pages). 0028 left mfz_enable at 0, so on this ROM the reserved
+backing space for frozen apps was never in effect (r6 showed
+mfz_enable=0 with persist.sys.mfz.enable=true).
+
+Origin: MiCode/Xiaomi_Kernel_OpenSource bixi-v-oss 56295df675b9（zram_add 中 mfz_enable = 1）；官方 yudi zram.ko 反汇编核对；PerfInit 反汇编（只在 persist.sys.mfz.enable 为 false 时写 0）
+Upstream-Status: Not-Applicable
+KABI: none
+Depends-On: xiaomi/0028
+Tested-On: clang 18.1.3 交叉编译 drivers/block/zram 通过；未实机验证
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ drivers/block/zram/zram_drv.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
+index fceb570e4..f3363aac8 100644
+--- a/drivers/block/zram/zram_drv.c
++++ b/drivers/block/zram/zram_drv.c
+@@ -2844,6 +2844,14 @@ static int zram_add(void)
+ 	init_rwsem(&zram->init_lock);
+ #ifdef CONFIG_ZRAM_WRITEBACK
+ 	spin_lock_init(&zram->wb_limit_lock);
++#ifdef CONFIG_MI_MEMORY_FREEZE
++	/*
++	 * Xiaomi's default: on. PerfInit only ever writes 0 here (when
++	 * persist.sys.mfz.enable is false) and sets mfz_disk_quota itself.
++	 */
++	zram->mfz_enable = 1;
++	zram->mfz_disk_quota = 0;
++#endif
+ 	zram->writeback_pages = alloc_pages(GFP_KERNEL, MAX_WRITEBACK_ORDER);
+ 	if (zram->writeback_pages)
+ 		split_page(zram->writeback_pages, MAX_WRITEBACK_ORDER);
+-- 
+2.43.0
+

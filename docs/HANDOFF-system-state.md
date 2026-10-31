@@ -42,7 +42,8 @@
 
 ## ExtM 与内存冻结（mfz）
 
-- 0027 把 zram 换成小米 ExtM 写回实现；0028 加 mfz 策略；0029 修复 memcg 文件注册位置（小米 spinel 源码把注册写在 `return 0` 之后，0027 原样带入）
+- 0027 把 zram 换成小米 ExtM 写回实现；0028 加 mfz 策略；0030（r6 之后，待构建）把 `mfz_enable`
+  默认值改为 1——r6 上的 `mfz_enable=0` 正是 0028 默认值错误所致；0029 修复 memcg 文件注册位置（小米 spinel 源码把注册写在 `return 0` 之后，0027 原样带入）
   （小米 spinel 源码把 `cgroup_add_legacy_cftypes()` 放在 `zram_init()` 的 `return 0` 之后，0027 原样带入）。
 - 设备实测：zram 内建，`comp_algorithm` 为 `[lz4kd]`，`backing_dev` 为
   `/dev/block/dm-48`；`/sys/block/zram0` 出现 `mfz_enable`、`mfz_disk_quota`、

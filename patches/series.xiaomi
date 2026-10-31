@@ -27,3 +27,4 @@
 xiaomi/0027-zram-xiaomi-extm.patch
 xiaomi/0028-zram-xiaomi-memory-freeze.patch
 xiaomi/0029-zram-memcg-anno-register.patch
+xiaomi/0030-zram-mfz-enable-default.patch

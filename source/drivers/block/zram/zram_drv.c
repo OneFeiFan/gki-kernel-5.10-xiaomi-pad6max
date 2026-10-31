@@ -2844,6 +2844,14 @@ static int zram_add(void)
 	init_rwsem(&zram->init_lock);
 #ifdef CONFIG_ZRAM_WRITEBACK
 	spin_lock_init(&zram->wb_limit_lock);
+#ifdef CONFIG_MI_MEMORY_FREEZE
+	/*
+	 * Xiaomi's default: on. PerfInit only ever writes 0 here (when
+	 * persist.sys.mfz.enable is false) and sets mfz_disk_quota itself.
+	 */
+	zram->mfz_enable = 1;
+	zram->mfz_disk_quota = 0;
+#endif
 	zram->writeback_pages = alloc_pages(GFP_KERNEL, MAX_WRITEBACK_ORDER);
 	if (zram->writeback_pages)
 		split_page(zram->writeback_pages, MAX_WRITEBACK_ORDER);

@@ -7,6 +7,23 @@
 > 注册修复），进入 `p0-series-xiaomi`（29 补丁，树 `2afd8cc8`），r6 实机验证。
 > 下面保留 2026-10-29 的原始调研记录；实测结果见文末「2026-10-31 实测」。
 
+## PerfInit 反汇编（2026-10-31）
+
+对移植包的 `/system_ext/xbin/system_perf_init` 做了反汇编：
+
+- `writeback_quota` 是日志笔误：代码 `access()` 的是 `/sys/block/zram0/mfz_disk_quota`，失败时
+  打印 "writeback_quota not exist"。PerfInit 从不读写 `writeback_quota`。
+- `zgroup_enable` 是另一套架构的开关（zram 分组 + memcg 级 xswapd 后台换出）。存在时 PerfInit
+  写 `zgroup_enable=1`、`/sys/block/zram0/reset`、`/dev/memcg/memory.xswapd.enable=1`、
+  `memory.xswapd.umrenable=1`；`backing_dev` 与 `zgroup_enable` 都不存在时才打印
+  "This device don't support extm."。miui-services.jar（`checkZgroupEnable`）、libmmperf.so、
+  MiuiMmTrace.o、init.rc 也引用它。无公开源码，不实现，也不能用空文件冒充。
+- mfz：`persist.sys.mfz.enable` 为 false 时 PerfInit 写 `mfz_enable=0`；为 true 时只写
+  `mfz_disk_quota`（`persist.sys.mfz.disk_quota`，默认 2048 MB → 524288 页），`mfz_enable`
+  依赖驱动默认值 1（小米 6.6 源码与官方 yudi zram.ko 均如此），由 `xiaomi/0030` 修正。
+- ExtM 服务的每次写回额度来自 `persist.lm.em.per_flush_quota_{high,medium,low}`（本机 8000 /
+  12000 / 20000）。
+
 ## 结论
 
 - ExtM 的写回后端仍然是块设备：`system_perf_init` 把 `/data/extm/extm_file`

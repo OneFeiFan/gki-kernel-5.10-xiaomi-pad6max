@@ -9,7 +9,7 @@
 按 `series.xiaomi` 应用（通用系列 26 个 + 小米组 3 个）后，也就是 yudi 实际构建和仓库 `source/` 的树：
 
 ```
-2afd8cc80fffd02546bc3e5532fc5707db80be25
+eaaa5c24d4d37a8b3228d5016c88f051a4301ac0
 ```
 
 ## 应用
@@ -83,6 +83,7 @@ while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series.xiaomi"   # 非�
 | 0027 | `xiaomi/0027-zram-xiaomi-extm.patch` | zram 升级为小米 ExtM 实现：分批写回（`idle <wb_max> <wb_idle_min>`）、按时间老化（`time_list`、`idle_stat`）、低压缩率优先写回（`low_compress_ratio`）、页面寿命与大小统计（`pages_life`、`avg_size`、`new`、`new_stat`、`origin_pages_max`、`wb_pages_max`）、SIGUSR1 中止写回；`MIUI_ZRAM_MEMORY_TRACKING` |
 | 0028 | `xiaomi/0028-zram-xiaomi-memory-freeze.patch` | 内存冻结（mfz）写回策略：页面进入 zram 时按所属 memcg 打标（`freeze-app` 组 → 不限额写回）；`mfz_enable`、`mfz_disk_quota`（为冻结应用预留写回空间）、`mfz_compr_data_size`、`mfz_idle_stat`；`bd_stat` 多三列；memcg 文件 `anno_writeback_enable`（5.10 名）与 `anno_writeback_control`（6.6 名）；`MI_MEMORY_FREEZE` |
 | 0029 | `xiaomi/0029-zram-memcg-anno-register.patch` | 修复 0027 带入的小米源码问题——memcg 文件注册：`cgroup_add_legacy_cftypes()` 原本在 `zram_init()` 的 `return 0` 之后，`memory.anno_writeback_*` 不会出现；把注册移到 return 之前。本地修复，依赖 0028 |
+| 0030 | `xiaomi/0030-zram-mfz-enable-default.patch` | `mfz_enable` 默认值改为 1，与小米 6.6 源码和官方 yudi zram.ko 一致；PerfInit 只在 `persist.sys.mfz.enable` 为 false 时写 0 |
 
 0027 的来源是 `MiCode/Xiaomi_Kernel_OpenSource` 的 `spinel-v-oss`（5.10.233，`49ff345d71ab`）。
 它基于 ACK，已包含本仓库 5.10.272 zram 的全部 ACK 改动，因此直接取其 `zram_drv.c`/`zram_drv.h`，
@@ -100,6 +101,20 @@ while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series.xiaomi"   # 非�
 仍然没有的：`writeback_quota`、`zgroup_enable`。名字来自移植包里的 PerfInit，任何公开源码和
 现有 zram.ko 都没有实现；PerfInit 遇到缺少的接口只打日志、继续运行。
 
+### PerfInit 反汇编结论（2026-10-31）
+
+- `writeback_quota`：PerfInit 并不读写这个文件。它检查的是 `mfz_disk_quota`，检查失败时打印的
+  日志文字写成了 "writeback_quota not exist"，是小米的日志笔误。不需要实现。
+- `zgroup_enable`：是另一套内存扩展架构的开关（按 memcg 分组管理 zram 对象，加上 memcg 级的后台
+  换出线程 xswapd）。文件存在时，PerfInit 会改走这条路：写 `zgroup_enable=1`、重置 zram、打开
+  `/dev/memcg/memory.xswapd.enable` 和 `memory.xswapd.umrenable`；判断"是否支持 ExtM"时也把它
+  和 `backing_dev` 并列。miui-services、libmmperf、MiuiMmTrace 也会检查它。没有任何公开源码，
+  内核侧需要整套分组与 xswapd 机制，**不实现、也不能放空文件**，否则 PerfInit 会切到一个内核
+  并不具备的模式。
+- `mfz_enable`：PerfInit 只在 `persist.sys.mfz.enable` 为 false 时写 0，依赖驱动默认值为 1，
+  由 0030 修正；`mfz_disk_quota` 由 PerfInit 写入（`persist.sys.mfz.disk_quota`，默认 2048 MB，
+  即 524288 页）。
+
 ## 2026-10-31 第二次调整：zram 内建 + 小米组
 
 同日曾把 zram 交还厂商模块（移植包里的 zram.ko 是第三方月亮内核的闭源构建），随后改为
@@ -108,7 +123,7 @@ while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series.xiaomi"   # 非�
 
 - 0016、0017 回到通用系列（编号不变）；0015 负责启用压缩算法，0016 的配置块只含 zram、
   zsmalloc、LZO 和默认算法。
-- 新增 `xiaomi/0027`（ExtM）、`xiaomi/0028`（内存冻结）和 `xiaomi/0029`（memcg 文件注册修复，本地）；0027/0028 来自小米官方源码；`series.xiaomi` = 通用系列 + 小米组。
+- 新增 `xiaomi/0027`（ExtM）、`xiaomi/0028`（内存冻结）、`xiaomi/0029`（memcg 文件注册修复）和 `xiaomi/0030`（`mfz_enable` 默认值）；0027/0028 来自小米官方源码；`series.xiaomi` = 通用系列 + 小米组。
 - 本地验证：两个 series 都能完整打上，树哈希如上；单独打补丁和"去掉一个"测试只剩 0009→0008、
   0020→0019、0025→0015 三处依赖（0027 依赖 0016/0017 的配置，补丁本身可独立打上）；用
   clang 18.1.3 按 `gki_defconfig` 交叉编译 `drivers/block/zram`、`kernel/module.c`、
