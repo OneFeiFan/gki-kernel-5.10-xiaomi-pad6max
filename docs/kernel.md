@@ -134,7 +134,7 @@ per-node 的 kcompressd 线程，压缩和写回不再占用回收线程。
 
 ## ExtM 与内存冻结（mfz）
 
-0027 把 zram 换成小米 ExtM 写回实现，0028 加 mfz 策略，0029 修复 0028 的 memcg 文件
+0027 把 zram 换成小米 ExtM 写回实现，0028 加 mfz 策略，0029 修复 0027 从小米源码带入的 memcg 文件
 注册位置。r6（29 补丁）实机结果：
 
 - zram 内建，`comp_algorithm` 为 `[lz4kd]`，`backing_dev` 为 `/dev/block/dm-48`
@@ -145,7 +145,7 @@ per-node 的 kcompressd 线程，压缩和写回不再占用回收线程。
   `mfz_compr_data_size` 为 2,871,990 字节；进程退出后回到约 0
 - `mfz_enable=0`、`mfz_disk_quota=524288`，默认由 ROM 的 PerfInit 决定是否启用
 
-冻结器的现状（2026-10-31 实测，测试后已恢复）：本 ROM 的 cgroup2 只绑了 `pids`，
+冻结器的现状（2026-10-31 实测，测试后已恢复）：本 ROM 的 cgroup2 只绑了 `pids`（因果待确认：cgroup v2 的冻结是内核核心功能、不需要绑定控制器，"只绑了 pids"本身是正常的；关键要看应用进程是否位于 `/sys/fs/cgroup` 的 `uid_*/pid_*` 组里），
 而 `cgroups.json` 把 freezer 声明在 cgroup2（文件 `cgroup.freeze`），system_server
 初始化失败后记录 `Freezer disabled`，每次开机把 `cached_apps_freezer` 改回
 `disabled`，`am freeze` 触发 `CachedAppOptimizer` 空指针。cgroup v1 freezer 可以

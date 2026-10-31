@@ -4,15 +4,17 @@ Date: Sat, 31 Oct 2026 14:43:09 +0800
 Subject: [PATCH] zram: register the anno writeback cgroup files before
  returning
 
-0028 added the memcg cftype handlers but placed
-cgroup_add_legacy_cftypes() after the unconditional return in
-zram_init(), so the files never appeared. Move the registration before
-the return.
+Xiaomi's spinel zram_init() (carried as-is by 0027) calls
+cgroup_add_legacy_cftypes() after the unconditional "return 0", so the
+memory.anno_writeback_* files never appeared - in Xiaomi's own tree as
+well - and init.rc's writes to them were lost. 0028 extended the same
+cftype array. Move the registration before the return.
 
-Origin: local fix on top of xiaomi/0028 (handoff 2026-10-31)
+Origin: 本地修复；问题来自 MiCode spinel-v-oss 49ff345d71ab 的 drivers/block/zram/zram_drv.c（0027 原样带入）
 Upstream-Status: Not-Applicable
 KABI: none
-Depends-On: xiaomi/0028
+Depends-On: xiaomi/0027（注册代码），xiaomi/0028（同一 cftype 数组）
+Tested-On: yudi r6 实机：freeze-app/memory.anno_writeback_enable=2；clang 18.1.3 交叉编译通过
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
 ---

@@ -42,8 +42,8 @@
 
 ## ExtM 与内存冻结（mfz）
 
-- 0027 把 zram 换成小米 ExtM 写回实现；0028 加 mfz 策略；0029 修复 memcg 文件注册位置
-  （原补丁把 `cgroup_add_legacy_cftypes()` 放在 `zram_init()` 的 `return 0` 之后）。
+- 0027 把 zram 换成小米 ExtM 写回实现；0028 加 mfz 策略；0029 修复 memcg 文件注册位置（小米 spinel 源码把注册写在 `return 0` 之后，0027 原样带入）
+  （小米 spinel 源码把 `cgroup_add_legacy_cftypes()` 放在 `zram_init()` 的 `return 0` 之后，0027 原样带入）。
 - 设备实测：zram 内建，`comp_algorithm` 为 `[lz4kd]`，`backing_dev` 为
   `/dev/block/dm-48`；`/sys/block/zram0` 出现 `mfz_enable`、`mfz_disk_quota`、
   `mfz_compr_data_size`、`mfz_idle_stat`、`bd_stat`。
@@ -51,7 +51,7 @@
   `mfz_enable=0`、`mfz_disk_quota=524288`，由 ROM 的 PerfInit 决定是否启用。
 - mfz 计数实测：测试进程在 `freeze-app` 换出 512MB 后 `mfz_compr_data_size` 为
   2,871,990 字节；进程退出后回到约 0。按 memcg 打标和计数路径正常。
-- 冻结侧（2026-10-31 实测后已恢复原状）：本 ROM 的 cgroup2 只绑了 `pids`，而
+- 冻结侧（2026-10-31 实测后已恢复原状）：本 ROM 的 cgroup2 只绑了 `pids`（因果待确认：cgroup v2 的冻结是内核核心功能、不需要绑定控制器，"只绑了 pids"本身是正常的；关键要看应用进程是否位于 `/sys/fs/cgroup` 的 `uid_*/pid_*` 组里），而
   `cgroups.json` 把 freezer 声明在 cgroup2（`cgroup.freeze`），system_server
   初始化失败，日志 `Freezer disabled`，每次开机把 `cached_apps_freezer` 改回
   `disabled`，`am freeze` 空指针。cgroup v1 freezer 可以手动挂载

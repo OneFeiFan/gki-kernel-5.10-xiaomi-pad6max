@@ -103,7 +103,7 @@ cat /sys/block/zram0/comp_algorithm     # 仍应为 [lz4kd]
 - mfz 计数：把测试进程放进 `freeze-app`，`MADV_PAGEOUT` 换出 512MB 后
   `mfz_compr_data_size=2,871,990` 字节；进程退出后回到约 0。
 - 冻结侧：cgroup v1 freezer 手动挂载 `/sys/fs/cgroup/freezer` 可用（tick 测试冻结
-  10 秒无输出，解冻恢复）；cgroup2 只有 pids，而 `cgroups.json` 把 freezer 声明在
+  10 秒无输出，解冻恢复）；cgroup2 只有 pids（因果待确认：cgroup v2 的冻结是内核核心功能、不需要绑定控制器，"只绑了 pids"本身是正常的；关键要看应用进程是否位于 `/sys/fs/cgroup` 的 `uid_*/pid_*` 组里），而 `cgroups.json` 把 freezer 声明在
   cgroup2，system_server 记 `Freezer disabled` 并把 `cached_apps_freezer` 改回
   `disabled`，`am freeze` 空指针。第三方 v1 冻结不会把进程搬进 `freeze-app`，
   mfz 在第三方墓碑下不参与。

@@ -82,7 +82,7 @@ while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series.xiaomi"   # 非�
 |---|---|---|
 | 0027 | `xiaomi/0027-zram-xiaomi-extm.patch` | zram 升级为小米 ExtM 实现：分批写回（`idle <wb_max> <wb_idle_min>`）、按时间老化（`time_list`、`idle_stat`）、低压缩率优先写回（`low_compress_ratio`）、页面寿命与大小统计（`pages_life`、`avg_size`、`new`、`new_stat`、`origin_pages_max`、`wb_pages_max`）、SIGUSR1 中止写回；`MIUI_ZRAM_MEMORY_TRACKING` |
 | 0028 | `xiaomi/0028-zram-xiaomi-memory-freeze.patch` | 内存冻结（mfz）写回策略：页面进入 zram 时按所属 memcg 打标（`freeze-app` 组 → 不限额写回）；`mfz_enable`、`mfz_disk_quota`（为冻结应用预留写回空间）、`mfz_compr_data_size`、`mfz_idle_stat`；`bd_stat` 多三列；memcg 文件 `anno_writeback_enable`（5.10 名）与 `anno_writeback_control`（6.6 名）；`MI_MEMORY_FREEZE` |
-| 0029 | `xiaomi/0029-zram-memcg-anno-register.patch` | 修复 0028 的 memcg 文件注册：`cgroup_add_legacy_cftypes()` 原本在 `zram_init()` 的 `return 0` 之后，`memory.anno_writeback_*` 不会出现；把注册移到 return 之前。本地修复，依赖 0028 |
+| 0029 | `xiaomi/0029-zram-memcg-anno-register.patch` | 修复 0027 带入的小米源码问题——memcg 文件注册：`cgroup_add_legacy_cftypes()` 原本在 `zram_init()` 的 `return 0` 之后，`memory.anno_writeback_*` 不会出现；把注册移到 return 之前。本地修复，依赖 0028 |
 
 0027 的来源是 `MiCode/Xiaomi_Kernel_OpenSource` 的 `spinel-v-oss`（5.10.233，`49ff345d71ab`）。
 它基于 ACK，已包含本仓库 5.10.272 zram 的全部 ACK 改动，因此直接取其 `zram_drv.c`/`zram_drv.h`，
@@ -94,7 +94,7 @@ while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series.xiaomi"   # 非�
 接口名和取值对照官方 yudi zram.ko：`anno_writeback_enable` 写非零即把该组标为内存冻结（取值 2），
 `anno_writeback_protected` 标为受保护（取值 1）；另提供 6.6 的 `anno_writeback_control`，因为移植包的
 `init.rc` 两套都会写。加上 0028 后，本仓库 zram 的 sysfs 接口与官方 yudi zram.ko 完全一致（30 个）。
-0029 修复这组 memcg 文件的注册位置：注册必须在 `zram_init()` 返回之前完成，否则
+0029 修复这组 memcg 文件的注册位置（问题出在小米 spinel 源码本身：`zram_init()` 把注册写在 `return 0` 之后，是永远执行不到的代码，0027 原样带入）：注册必须在 `zram_init()` 返回之前完成，否则
 `/dev/memcg/freeze-app/memory.anno_writeback_enable` 等文件不会出现；zram sysfs 仍是 30 个。
 
 仍然没有的：`writeback_quota`、`zgroup_enable`。名字来自移植包里的 PerfInit，任何公开源码和
