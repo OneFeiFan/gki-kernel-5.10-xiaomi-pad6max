@@ -38,7 +38,7 @@
 | 镜像 | r14/r15/r16 只在本地（未发布）；最后发布的是 r3 |
 | 灰度 | RCU lazy 默认关、可写开关；SSG 仅可选不默认；WQ power efficient；zram 内建 + 小米 ExtM；Kcompressd；governor 默认 qcom-cpu-lpm；PELT multiplier 保持 1 |
 | GitHub | `OneFeiFan/gki-kernel-5.10-xiaomi-pad6max`，`pad6max` 快照分支 |
-| 模块 | yudi-tweaks 2.2（GOV、RCU lazy、实验调参）；ntsync 1.1 |
+| 模块 | yudi-tweaks 2.3（GOV、RCU lazy、实验调参、MFZ 白名单改进）；ntsync 1.1 |
 
 ## 驱动分层
 
