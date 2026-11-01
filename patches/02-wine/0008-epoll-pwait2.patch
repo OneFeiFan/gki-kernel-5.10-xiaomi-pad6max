@@ -1,4 +1,4 @@
-From e43a5629fbc9bfa97d05eee17ea98a446f6e9e53 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] epoll: backport epoll_pwait2
@@ -283,6 +283,3 @@ index 8ae259772..26dcc264b 100644
  COND_SYSCALL_COMPAT(epoll_pwait);
  
  /* fs/fcntl.c */
--- 
-2.43.0
-

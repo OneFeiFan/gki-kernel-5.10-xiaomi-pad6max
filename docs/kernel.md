@@ -7,8 +7,8 @@
 缓存键里，`/proc/config.gz` 可能还是上一次的配置数据，看起来像配置没生效。
 
 当前基线是 ACK `android12-5.10-lts` 的 `8059ae2`（2026-10-24，Linux 5.10.272）；
-`series` 99 个通用补丁的树是 `8f65209b...`，`series.xiaomi` 103 个（通用 99 + 小米 4）
-的树是 `7f30604d...`。`8059ae2` 相对旧基线 `a1eed2e9c` 的净差异
+`series` 46 个通用补丁的树是 `f2545102...`，`series.xiaomi` 48 个（通用 46 + 小米 2）
+的树是 `2eaa32fd...`（2026-11-01 按功能合并后的 r17；r16 为 `8f65209b...` / `7f30604d...`）。`8059ae2` 相对旧基线 `a1eed2e9c` 的净差异
 只有 `net/can/bcm.c` 的一处回退；ACK 10 月的 ASB 修复旧基线里已经通过其他提交合入。
 
 ## 门禁
@@ -157,7 +157,7 @@ TEO 的深睡占比略高，没有异常；功耗和唤醒延迟没有测，默�
 
 ## RCU 惰性回调（r14）
 
-r14 加入 ACK android14-5.15 路线的 RCU 惰性回调（`16-rcu/0091-0102`，12 个补丁）：
+r14 加入 ACK android14-5.15 路线的 RCU 惰性回调（现为 `16-rcu/0046-rcu-lazy.patch`，r16 时是 0091–0103 共 13 个补丁）：
 旧 5.10 惰性核心 + 开机/挂起 `rcu_async_hurry_nesting` + 可写运行时开关
 `/sys/module/rcutree/parameters/enable_rcu_lazy`（默认 `N`，0644）+ 收缩器修正 +
 `call_rcu_hurry` 调用点。配置 `CONFIG_RCU_LAZY=y`、`CONFIG_RCU_LAZY_DEFAULT_OFF=y`；
@@ -174,10 +174,10 @@ SSG 来自三星 SM-S908B 源码（ztc1997 移植），独立分支 `ssg-r14`、
 
 ## 灰度与探针
 
-- `CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y`（0024）：默认启用 power-efficient
+- `CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y`（0022，r16 旧编号 0024）：默认启用 power-efficient
   unbound workqueues。已确认 `/sys/module/workqueue/parameters/power_efficient=Y`；
   真实功耗 A/B 还没做，去掉补丁即可回退。
-- `CONFIG_ZRAM_WRITEBACK=y`（0017）：上游写回；小米 PerfInit 用它挂 ExtM 写回设备，ExtM 写回逻辑由 `xiaomi/0027` 提供。
+- `CONFIG_ZRAM_WRITEBACK=y`（0017）：上游写回；小米 PerfInit 用它挂 ExtM 写回设备，ExtM 写回逻辑由 `xiaomi/0047`（r16 旧编号 0027）提供。
   `backing_dev`、`writeback*`、`bd_stat` 等节点；ExtM 是否真正启动取决于
   PerfInit 的启动门槛，见 [ExtM-research.md](ExtM-research.md)。
 

@@ -157,7 +157,7 @@ kernel_patches 有 4.4–5.15 的硬化补丁。结论：没有现成可跟的�
 ## yudi 与中文社区
 
 - Star-ZER0 的 yudi 5.10.252 fork：Droidspaces 社区验证可用。
-- 报告称小米公开了 yudi-t-oss 5.10.160 源码（未核实，见 HANDOFF 的待确认项）。
+- 小米公开的 yudi-t-oss 5.10.160 源码已核实（MiCode 分支提交 `202c7eaa`，ExtM 调研时用过；其中的 zram 是原版）。
 - AOSPA 有 yudi 的预编译配置；Uotan 有 yudi 移植包；Amktiao 有模块。
 - lkm4ctr 的 Docker 模块可以免刷内核跑 Docker，说明容器需求不一定非要自定义内核。
 - 这些多为二手信息，没有逐条验证。
@@ -167,7 +167,7 @@ kernel_patches 有 4.4–5.15 的硬化补丁。结论：没有现成可跟的�
 - source.android.com 2026-08-01 页面抓 3 次都没有 CVE 表，8 月内核项未核对到。
 - kernel.org 的 commit/patch 页和 CVE 仓库克隆 TLS 失败；5.10.273 部分修复的 CVE 号
   只能记"未说明"。
-- EROFS zstd 回移来源（7c442bbe）和 ADIOS 版本是两处矛盾，待核对。
+- ADIOS 版本已核对：实际是 3.2.0（源码宏为准）。EROFS zstd 回移来源（7c442bbe）仍待核对。
 - 社区二手信息未验证。
 
 ## 判断（2026-10-30）

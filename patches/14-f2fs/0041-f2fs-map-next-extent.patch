@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chao Yu <chao@kernel.org>
+Date: Fri, 12 Sep 2025 16:12:50 +0800
+Subject: [PATCH] f2fs: fix to update map->m_next_extent correctly in
+ f2fs_map_blocks()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+[ Upstream commit 869833f54e8306326b85ca3ed08979b7ad412a4a ]
+
+Script to reproduce:
+mkfs.f2fs -O extra_attr,compression /dev/vdb -f
+mount /dev/vdb /mnt/f2fs -o mode=lfs,noextent_cache
+cd /mnt/f2fs
+f2fs_io write 1 0 1024 rand dsync testfile
+xfs_io testfile -c "fsync"
+f2fs_io write 1 0 512 rand dsync testfile
+xfs_io testfile -c "fsync"
+cd /
+umount /mnt/f2fs
+mount /dev/vdb /mnt/f2fs
+f2fs_io precache_extents /mnt/f2fs/testfile
+umount /mnt/f2fs
+
+Tracepoint output:
+f2fs_update_read_extent_tree_range: dev = (253,16), ino = 4, pgofs = 0, len = 512, blkaddr = 1055744, c_len = 0
+f2fs_update_read_extent_tree_range: dev = (253,16), ino = 4, pgofs = 513, len = 351, blkaddr = 17921, c_len = 0
+f2fs_update_read_extent_tree_range: dev = (253,16), ino = 4, pgofs = 864, len = 160, blkaddr = 18272, c_len = 0
+
+During precache_extents, there is off-by-one issue, we should update
+map->m_next_extent to pgofs rather than pgofs + 1, if last blkaddr is
+valid and not contiguous to previous extent.
+
+Fixes: c4020b2da4c9 ("f2fs: support F2FS_IOC_PRECACHE_EXTENTS")
+Signed-off-by: Chao Yu <chao@kernel.org>
+Signed-off-by: Jaegeuk Kim <jaegeuk@kernel.org>
+Signed-off-by: Sasha Levin <sashal@kernel.org>
+
+Origin: 4267734542b0（上游 f2fs 修正）（旧 0087）
+Upstream-Status: Backport
+KABI: none
+Depends-On: none
+Notes: 旧 0087；本地补了 is_hole 变量
+Tested-On: r16（2026-11-01）：完整构建、KMI 门禁（7298 个导出符号，缺失 0，CRC 差异 0；670 个厂商模块 0 失败）、开机
+---
+ fs/f2fs/data.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/fs/f2fs/data.c b/fs/f2fs/data.c
+index bc82a4e0a..168682ee7 100644
+--- a/fs/f2fs/data.c
++++ b/fs/f2fs/data.c
+@@ -1493,6 +1493,7 @@ int f2fs_map_blocks(struct inode *inode, struct f2fs_map_blocks *map,
+ 	blkcnt_t prealloc;
+ 	struct extent_info ei = {0, };
+ 	block_t blkaddr;
++	bool is_hole = false;
+ 	unsigned int start_pgofs;
+ 
+ 	if (!maxblocks)
+@@ -1566,6 +1567,7 @@ int f2fs_map_blocks(struct inode *inode, struct f2fs_map_blocks *map,
+ 
+ next_block:
+ 	blkaddr = f2fs_data_blkaddr(&dn);
++	is_hole = !__is_valid_data_blkaddr(blkaddr);
+ 
+ 	if (__is_valid_data_blkaddr(blkaddr) &&
+ 		!f2fs_is_valid_blkaddr(sbi, blkaddr, DATA_GENERIC_ENHANCE)) {
+@@ -1709,7 +1711,7 @@ int f2fs_map_blocks(struct inode *inode, struct f2fs_map_blocks *map,
+ 				map->m_len - ofs);
+ 		}
+ 		if (map->m_next_extent)
+-			*map->m_next_extent = pgofs + 1;
++			*map->m_next_extent = is_hole ? pgofs + 1 : pgofs;
+ 	}
+ 	f2fs_put_dnode(&dn);
+ unlock_out:

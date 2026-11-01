@@ -1,4 +1,4 @@
-From 3a57e6fa90845f25d2a8b26ea0cf4ac0cd16483b Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Fri, 30 Oct 2026 00:10:22 +0800
 Subject: [PATCH] lib: zstd: upgrade to 1.5.7
@@ -50363,6 +50363,3 @@ index 55e1b4cba..000000000
 -}
 -
 -#endif /* ZSTD_OPT_H_91842398743 */
--- 
-2.43.0
-

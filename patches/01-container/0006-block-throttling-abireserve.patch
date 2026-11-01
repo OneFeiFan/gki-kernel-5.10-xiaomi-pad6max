@@ -1,4 +1,4 @@
-From c175e9a7755df237fa31340fbed53b1646409787 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:55 +0800
 Subject: [PATCH] block: overlay block throttling state on the KABI reserve
@@ -73,6 +73,3 @@ index 961bfbf54..198142db9 100644
  	ANDROID_KABI_RESERVE(2);
  	ANDROID_KABI_RESERVE(3);
  	ANDROID_KABI_RESERVE(4);
--- 
-2.43.0
-

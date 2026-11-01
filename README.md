@@ -31,16 +31,20 @@ RCU 惰性回调等运行时开关。RCU 惰性回调默认关闭，路径是
 [docs/ecosystem-survey.md](docs/ecosystem-survey.md)。只归档，没有据此改内核。
 
 2026-10-31 基线已升到 ACK lts 最新 `8059ae2`。此后 r6–r14 陆续加入正确性修复、
-f2fs 修正、binder 位图查找和 RCU 惰性回调；当前共 103 个补丁（通用 99 + 小米 4），
-r16 树是 `7f30604d...`。r16 在 r14 基础上加了 SCSI EH 的 `call_rcu_hurry()` 修正；
+f2fs 修正、binder 位图查找和 RCU 惰性回调；r16 时共 103 个补丁（通用 99 + 小米 4），树 `7f30604d...`。
+r16 在 r14 基础上加了 SCSI EH 的 `call_rcu_hurry()` 修正；
 r15 是可选的 SSG 临时测试镜像，SSG 不设默认，默认仍是 cpq。
+
+2026-11-01 把 103 个补丁按功能合并为 48 个（通用 46 + 小米 2），合并前后源码树逐字节相同；
+随后 0011 的 le9uo OOM 兜底改为不能换出时只填充文件页链表，r17 树是 `2eaa32fd...`，
+待重新构建并跑门禁。旧编号对照见 [patches/README.md](patches/README.md)。
 
 ## 仓库结构
 
 | 目录 | 内容 |
 | --- | --- |
 | `source/` | 内核源码，构建环境里的 `common/` |
-| `patches/` | 相对 5.10.272 的 103 个功能补丁 |
+| `patches/` | 相对 5.10.272 的 48 个功能补丁（通用 46 + 小米 2） |
 | `tools/` | 验证脚本：符号、CRC、配置、结构布局 |
 | `docs/` | 构建与验证、设备状态、模块说明、GPU/ExtM 研究、生态调研 |
 
@@ -92,7 +96,7 @@ fastboot reboot
 ## 补丁
 
 补丁在 `patches/`，基线是 `8059ae2`（ACK `android12-5.10-lts`，2026-10-24）。`series`
-99 条、`series.xiaomi` 103 条（通用 99 + 小米 4），按功能分目录
+46 条、`series.xiaomi` 48 条（通用 46 + 小米 2），一个功能一个补丁，按子系统分目录
 （`00-platform/` … `16-rcu/`），`series` 决定应用顺序。按 `series` 顺序应用：
 
 ```sh

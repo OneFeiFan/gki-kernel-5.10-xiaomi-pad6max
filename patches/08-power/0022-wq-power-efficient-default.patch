@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Thu, 29 Oct 2026 21:56:13 +0800
+Subject: [PATCH] config: enable WQ_POWER_EFFICIENT_DEFAULT
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Enable power-efficient unbound workqueues by default for a gray test.
+This changes where unbound workqueues run, not any exported layout.
+
+Origin: 本地配置（参考 ztc1997 树的建议）
+Upstream-Status: Not-Applicable
+KABI: none
+Depends-On: none
+Tested-On: yudi 5.10.272, 2026-10-29
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ arch/arm64/configs/gki_defconfig | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index ec0e1b094..3cc72f01a 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -86,6 +86,8 @@ CONFIG_PM_WAKELOCKS=y
+ CONFIG_PM_WAKELOCKS_LIMIT=0
+ # CONFIG_PM_WAKELOCKS_GC is not set
+ CONFIG_ENERGY_MODEL=y
++# yudi: power-efficient unbound workqueues (gray test)
++CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+ CONFIG_CPU_IDLE=y
+ CONFIG_CPU_IDLE_GOV_MENU=y
+ CONFIG_CPU_IDLE_GOV_TEO=y

@@ -1,4 +1,4 @@
-From 4adf4732627e2aad030f8dbb70d3454abe4c555d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] futex: backport futex_waitv
@@ -500,6 +500,3 @@ index 26dcc264b..26b677d57 100644
  
  /* kernel/hrtimer.c */
  
--- 
-2.43.0
-

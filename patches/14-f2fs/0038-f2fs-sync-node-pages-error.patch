@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chao Yu <chao@kernel.org>
+Date: Thu, 8 May 2025 07:14:27 +0200
+Subject: [PATCH] f2fs: fix to return correct error number in
+ f2fs_sync_node_pages()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+If __write_node_folio() failed, it will return AOP_WRITEPAGE_ACTIVATE,
+the incorrect return value may be passed to userspace in below path,
+fix it.
+
+- sync_filesystem
+ - sync_fs
+  - f2fs_issue_checkpoint
+   - block_operations
+    - f2fs_sync_node_pages
+     - __write_node_folio
+     : return AOP_WRITEPAGE_ACTIVATE
+
+Cc: stable@vger.kernel.org
+Reported-by: Christoph Hellwig <hch@lst.de>
+Signed-off-by: Chao Yu <chao@kernel.org>
+Signed-off-by: Jaegeuk Kim <jaegeuk@kernel.org>
+
+Origin: d94445903c9b（上游 f2fs 修正）（旧 0084）
+Upstream-Status: Backport
+KABI: none
+Depends-On: none
+Notes: 旧 0084
+Tested-On: r16（2026-11-01）：完整构建、KMI 门禁（7298 个导出符号，缺失 0，CRC 差异 0；670 个厂商模块 0 失败）、开机
+---
+ fs/f2fs/node.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/fs/f2fs/node.c b/fs/f2fs/node.c
+index f66115de2..a21e13605 100644
+--- a/fs/f2fs/node.c
++++ b/fs/f2fs/node.c
+@@ -2042,10 +2042,14 @@ int f2fs_sync_node_pages(struct f2fs_sb_info *sbi,
+ 
+ 			ret = __write_node_page(page, false, &submitted,
+ 						wbc, do_balance, io_type, NULL);
+-			if (ret)
++			if (ret) {
+ 				unlock_page(page);
+-			else if (submitted)
++				pagevec_release(&pvec);
++				ret = -EIO;
++				goto out;
++			} else if (submitted) {
+ 				nwritten++;
++			}
+ 
+ 			if (--wbc->nr_to_write == 0)
+ 				break;

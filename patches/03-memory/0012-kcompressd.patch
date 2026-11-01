@@ -1,4 +1,4 @@
-From c5c9d0a760cb6e263a861d2efe3e42d9fdf79c15 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Fri, 30 Oct 2026 21:23:40 +0800
 Subject: [PATCH] mm: add Kcompressd for asynchronous swap compression
@@ -217,7 +217,7 @@ index a03bd559b..6957c4755 100644
  {
  #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 diff --git a/mm/vmscan.c b/mm/vmscan.c
-index c288f7d02..8b80e67e6 100644
+index c21c5fdf2..ca10c84d1 100644
 --- a/mm/vmscan.c
 +++ b/mm/vmscan.c
 @@ -20,6 +20,7 @@
@@ -237,7 +237,7 @@ index c288f7d02..8b80e67e6 100644
  #define DEF_KSWAPD_THREADS_PER_NODE 1
  static int kswapd_threads = DEF_KSWAPD_THREADS_PER_NODE;
  static int __init kswapd_per_node_setup(char *str)
-@@ -4356,6 +4359,26 @@ int kswapd_run(int nid)
+@@ -4392,6 +4395,26 @@ int kswapd_run(int nid)
  		ret = PTR_ERR(pgdat->kswapd);
  		pgdat->kswapd = NULL;
  	}
@@ -264,7 +264,7 @@ index c288f7d02..8b80e67e6 100644
  	return ret;
  }
  
-@@ -4365,7 +4388,8 @@ int kswapd_run(int nid)
+@@ -4401,7 +4424,8 @@ int kswapd_run(int nid)
   */
  void kswapd_stop(int nid)
  {
@@ -274,7 +274,7 @@ index c288f7d02..8b80e67e6 100644
  
  	if (kswapd_threads > 1) {
  		kswapd_per_node_stop(nid);
-@@ -4374,7 +4398,13 @@ void kswapd_stop(int nid)
+@@ -4410,7 +4434,13 @@ void kswapd_stop(int nid)
  
  	if (kswapd) {
  		kthread_stop(kswapd);
@@ -289,6 +289,3 @@ index c288f7d02..8b80e67e6 100644
  	}
  }
  
--- 
-2.43.0
-

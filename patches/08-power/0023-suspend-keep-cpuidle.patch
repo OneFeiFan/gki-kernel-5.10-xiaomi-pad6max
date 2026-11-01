@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tim Murray <timmurray@google.com>
+Date: Wed, 21 Sep 2016 13:11:25 -0700
+Subject: [PATCH] cpuidle: don't disable cpuidle when entering suspend
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+cpuidle was disabled while entering suspend as part of commit
+8651f97bd951d0bb1c10fa24e3fa3455193f3548 in order to work around some
+ACPI bugs. However, there's no reason to do this on modern
+platforms. Leaving cpuidle enabled can result in improved power
+consumption if dpm_resume_noirq runs for a significant time.
+
+Change-Id: Ie182785b176f448698c0264eba554d1e315e8a06
+
+Origin: Tim Murray 571508da07（经 ESK）（旧 0052）
+Upstream-Status: Not-Upstream（Android/Pixel 内核改动）
+KABI: none
+Depends-On: none
+Notes: 旧 0052；改变挂起路径行为，出问题时优先去掉本补丁
+Tested-On: r16（2026-11-01）：完整构建、KMI 门禁（7298 个导出符号，缺失 0，CRC 差异 0；670 个厂商模块 0 失败）、开机；拔线待机与挂起成功率待验证
+---
+ drivers/base/power/main.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/drivers/base/power/main.c b/drivers/base/power/main.c
+index 339e32ece..875a05372 100644
+--- a/drivers/base/power/main.c
++++ b/drivers/base/power/main.c
+@@ -32,7 +32,6 @@
+ #include <linux/suspend.h>
+ #include <trace/events/power.h>
+ #include <linux/cpufreq.h>
+-#include <linux/cpuidle.h>
+ #include <linux/devfreq.h>
+ #include <linux/timer.h>
+ #include <linux/wakeup_reason.h>
+@@ -769,8 +768,6 @@ void dpm_resume_noirq(pm_message_t state)
+ 
+ 	resume_device_irqs();
+ 	device_wakeup_disarm_wake_irqs();
+-
+-	cpuidle_resume();
+ }
+ 
+ /**
+@@ -1369,8 +1366,6 @@ int dpm_suspend_noirq(pm_message_t state)
+ {
+ 	int ret;
+ 
+-	cpuidle_pause();
+-
+ 	device_wakeup_arm_wake_irqs();
+ 	suspend_device_irqs();
+ 

@@ -34,7 +34,7 @@
 | 分支 | `p0-series-xiaomi-0092-rcu-scsi`（r16）；SSG 可选分支 `ssg-r14` |
 | HEAD | `ca3d938a2`（r16，13 个 RCU 提交）；SSG `ba45f1858` |
 | 构建输出 | `~/kernel-sources/out-xiaomi`（r14）；r15 SSG 构建目录已清理，镜像保留 |
-| 补丁 | 103 个（通用 99 + 小米 4），基线 `8059ae2`；树 `8f65209b` / `7f30604d` |
+| 补丁 | 48 个（通用 46 + 小米 2，2026-11-01 按功能合并），基线 `8059ae2`；树 `f2545102` / `2eaa32fd`（r17，待构建）；r16 镜像对应合并前的 `8f65209b` / `7f30604d` |
 | 镜像 | r14/r15/r16 只在本地（未发布）；最后发布的是 r3 |
 | 灰度 | RCU lazy 默认关、可写开关；SSG 仅可选不默认；WQ power efficient；zram 内建 + 小米 ExtM；Kcompressd；governor 默认 qcom-cpu-lpm；PELT multiplier 保持 1 |
 | GitHub | `OneFeiFan/gki-kernel-5.10-xiaomi-pad6max`，`pad6max` 快照分支 |

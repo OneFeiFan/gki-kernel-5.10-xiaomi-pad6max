@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Tue, 3 May 2022 23:32:26 -0700
+Subject: [PATCH] PM / wakeup: Avoid excessive s2idle wake attempts in
+ pm_system_wakeup()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Calling s2idle_wake() once after pm_abort_suspend is incremented is all
+that's needed to wake up from s2idle. Avoid multiple unnecessary attempts
+to wake from s2idle by only doing the wakeup when pm_abort_suspend hits 1.
+The s2idle machinery already provides the synchronization needed to make
+this safe.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+
+Origin: ztc1997 4b81b6afa1（旧 0056）
+Upstream-Status: Backport（经 ztc1997）
+KABI: none
+Depends-On: none
+Notes: 旧 0056
+Tested-On: r16（2026-11-01）：完整构建、KMI 门禁（7298 个导出符号，缺失 0，CRC 差异 0；670 个厂商模块 0 失败）、开机
+---
+ drivers/base/power/wakeup.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/base/power/wakeup.c b/drivers/base/power/wakeup.c
+index 787936b00..21013d0e8 100644
+--- a/drivers/base/power/wakeup.c
++++ b/drivers/base/power/wakeup.c
+@@ -969,8 +969,8 @@ bool pm_wakeup_pending(void)
+ 
+ void pm_system_wakeup(void)
+ {
+-	atomic_inc(&pm_abort_suspend);
+-	s2idle_wake();
++	if (atomic_inc_return_relaxed(&pm_abort_suspend) == 1)
++		s2idle_wake();
+ }
+ EXPORT_SYMBOL_GPL(pm_system_wakeup);
+ 

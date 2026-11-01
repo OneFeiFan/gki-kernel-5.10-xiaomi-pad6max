@@ -2704,9 +2704,17 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 			}
 		}
 		if (all_zero) {
+			/* Anonymous pages cannot be reclaimed without swap. */
+			bool can_anon = sc->may_swap &&
+				can_reclaim_anon_pages(lruvec_memcg(lruvec),
+						       lruvec_pgdat(lruvec)->node_id,
+						       sc);
+
 			for_each_evictable_lru(lru) {
 				unsigned long size;
 
+				if (!is_file_lru(lru) && !can_anon)
+					continue;
 				size = lruvec_lru_size(lruvec, lru,
 						       sc->reclaim_idx);
 				if (size)

@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Sun, 1 Nov 2026 18:00:00 +0800
+Subject: [PATCH] cpuidle: idle entry fixes
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This patch consolidates the following patches of the r16 series
+(original authors are kept in the attached commit messages):
+
+- 旧 0050：cpuidle: Don't return from inside __CPU_PM_CPU_IDLE_ENTER() macro（Sultan Alsawaf）
+- 旧 0051：cpuidle: Reject idle entry if need_resched() is true（Sultan Alsawaf）
+
+Origin: 上游 1ebbdf5c22、1d2ce9dee1（经 ztc1997）（旧 0050、0051）
+Upstream-Status: Backport
+KABI: none
+Depends-On: none
+Notes: 旧 0050 + 0051 合并
+Tested-On: r16（2026-11-01）：完整构建、KMI 门禁（7298 个导出符号，缺失 0，CRC 差异 0；670 个厂商模块 0 失败）、开机
+
+Original commit messages:
+
+----- 旧 0050：cpuidle: Don't return from inside __CPU_PM_CPU_IDLE_ENTER() macro -----
+Author: Sultan Alsawaf <sultan@kerneltoast.com>
+
+Altering control flow from inside a macro is a recipe for disaster. This is
+a nightmare for readability and makes it very easy to trip over the return
+nestled in the __CPU_PM_CPU_IDLE_ENTER() macro.
+
+Restructure __CPU_PM_CPU_IDLE_ENTER() to eliminate the nasty return.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+
+----- 旧 0051：cpuidle: Reject idle entry if need_resched() is true -----
+Author: Sultan Alsawaf <sultan@kerneltoast.com>
+
+There's no reason to enter idle at this point in __CPU_PM_CPU_IDLE_ENTER()
+if the CPU needs to reschedule. Instead of fruitlessly entering the
+architecture's idle routine, reject the idle entry attempt with an error as
+an optimization.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ include/linux/cpuidle.h | 19 ++++++++++---------
+ 1 file changed, 10 insertions(+), 9 deletions(-)
+
+diff --git a/include/linux/cpuidle.h b/include/linux/cpuidle.h
+index 4b51019dd..b9f28bf17 100644
+--- a/include/linux/cpuidle.h
++++ b/include/linux/cpuidle.h
+@@ -286,17 +286,18 @@ extern s64 cpuidle_governor_latency_req(unsigned int cpu);
+ ({									\
+ 	int __ret = 0;							\
+ 									\
+-	if (!idx) {							\
++	if (need_resched()) {						\
++		__ret = -1;						\
++	} else if (!idx) {						\
+ 		cpu_do_idle();						\
+-		return idx;						\
+-	}								\
+-									\
+-	if (!is_retention)						\
+-		__ret =  cpu_pm_enter();				\
+-	if (!__ret) {							\
+-		__ret = low_level_idle_enter(state);			\
++	} else {							\
+ 		if (!is_retention)					\
+-			cpu_pm_exit();					\
++			__ret = cpu_pm_enter();				\
++		if (!__ret) {						\
++			__ret = low_level_idle_enter(state);		\
++			if (!is_retention)				\
++				cpu_pm_exit();				\
++		}							\
+ 	}								\
+ 									\
+ 	__ret ? -1 : idx;						\

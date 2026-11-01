@@ -14,7 +14,7 @@
   共有的 211 个符号 CRC 全部一致。它提供与官方 yudi 版相同的 ExtM 接口（另有
   `pp_buckets`），并内置异步 slab 回收线程 kshrink_slabd。
 - 最终没有采用月亮版：作者已停更、模块闭源无法审查，且自带异步 slab 回收等回收改动。
-  改为内建 zram + `xiaomi/0027`：直接取小米官方开源的 ExtM zram（`spinel-v-oss`
+  改为内建 zram + `xiaomi/0047`（r16 时为 0027）：直接取小米官方开源的 ExtM zram（`spinel-v-oss`
   5.10.233），它已包含本仓库 zram 的全部 ACK 改动。yudi 的 `yudi-t-oss`（5.10.160）里没有
   ExtM。
 - 内存冻结（mfz）只在小米 6.6 源码里公开：页面写入 zram 时读所属 memcg 的
@@ -23,7 +23,7 @@
   不成立）。设备上 `persist.sys.mfz.enable=true`，`/dev/memcg/freeze-app` 存在，`init.rc` 在
   `sys.boot_completed=1` 时写 `freeze-app/memory.anno_writeback_enable 1`、
   `protected-app/memory.anno_writeback_protected 1`、`protected-app/memory.anno_writeback_control 1`、
-  `mimd/critical1/memory.anno_writeback_protected 1`，因此已移植为 `xiaomi/0028`。
+  `mimd/critical1/memory.anno_writeback_protected 1`，因此已移植为 `xiaomi/0048`（r16 时为 0028）。
 
 ## 结论
 

@@ -1,7 +1,7 @@
 # 交接：补丁整理、zram 内建 + 小米 ExtM、yudi-tweaks 1.7/1.8（2026-10-31）
 
-> 历史快照：本文对应 2026-10-31 的 1.7/1.8 和 26/28 个补丁。当前状态（r14、102 个补丁、
-> yudi-tweaks 2.2）见 `patches/README.md` 和 `docs/HANDOFF-system-state.md`。
+> 历史快照：本文对应 2026-10-31 的 1.7/1.8 和 26/28 个补丁。文中编号均为当时的旧编号。当前状态（r17：48 个补丁，
+> 旧编号对照见 `patches/README.md`；yudi-tweaks 2.2）见 `patches/README.md` 和 `docs/HANDOFF-system-state.md`。
 
 本文件给负责合并的本地 AI。两个仓库各有一个 git bundle，直接拉取即可；下面说明每个提交
 做了什么、怎么验证、还剩什么。

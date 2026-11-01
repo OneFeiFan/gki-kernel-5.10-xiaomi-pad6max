@@ -1,4 +1,4 @@
-From 4ea0b626d08086ba0c6c396c24f26acb6981ac72 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:55 +0800
 Subject: [PATCH] net: enable ABI-safe container networking
@@ -2077,6 +2077,3 @@ index 992104107..3b7e49406 100644
  		if (rto_alpha < 32)
  			tp->srtt = tp->srtt - (tp->srtt >> rto_alpha)
  				+ (rtt >> rto_alpha);
--- 
-2.43.0
-

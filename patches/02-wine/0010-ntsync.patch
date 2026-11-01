@@ -1,4 +1,4 @@
-From a87ec44fc83c584cd6c99450f186e2ddabe037ff Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:56 +0800
 Subject: [PATCH] ntsync: add the NTSync driver for Wine/Proton
@@ -1388,6 +1388,3 @@ index 000000000..6d0679351
 +#define NTSYNC_IOC_EVENT_READ		_IOR ('N', 0x8d, struct ntsync_event_args)
 +
 +#endif
--- 
-2.43.0
-

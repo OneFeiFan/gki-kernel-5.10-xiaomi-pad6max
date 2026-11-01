@@ -1,0 +1,342 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Sun, 1 Nov 2026 18:00:00 +0800
+Subject: [PATCH] treewide: dedicated kmem_cache pools for hot small objects
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This patch consolidates the following patches of the r16 series
+(original authors are kept in the attached commit messages):
+
+- 旧 0071：kernfs: use kmem_cache pool for struct kernfs_open_node/file（Park Ju Hyung）
+- 旧 0072：cgroup: use kmem_cache pool for struct cgrp_cset_link（Park Ju Hyung）
+- 旧 0073：dma_buf: use kmem_cache pool for struct dma_buf_attachment（Park Ju Hyung）
+- 旧 0074：dma_buf: use kmem_cache pool for struct sync_file（Park Ju Hyung）
+
+Origin: Park Ju Hyung 的 kmem_cache 池：ESK f94ca8cb99（kernfs）、3f79c60d4c（cgroup cset link）、aaa5047b59（dma_buf attachment）；Melt 01fc461c35（sync_file）（旧 0071–0074）
+Upstream-Status: Not-Upstream（第三方）
+KABI: none（不改结构布局和导出符号）
+Depends-On: none
+Notes: 旧 0071–0074 合并；kernfs、init/main.c 两处按本树上下文适配
+Tested-On: r16（2026-11-01）：完整构建、KMI 门禁（7298 个导出符号，缺失 0，CRC 差异 0；670 个厂商模块 0 失败）、开机
+
+Original commit messages:
+
+----- 旧 0071：kernfs: use kmem_cache pool for struct kernfs_open_node/file -----
+Author: Park Ju Hyung <qkrwngud825@gmail.com>
+
+These get allocated and freed millions of times on this kernel tree.
+
+Use a dedicated kmem_cache pool and avoid costly dynamic memory allocations.
+
+Signed-off-by: Park Ju Hyung <qkrwngud825@gmail.com>
+
+----- 旧 0072：cgroup: use kmem_cache pool for struct cgrp_cset_link -----
+Author: Park Ju Hyung <qkrwngud825@gmail.com>
+
+These get allocated and freed millions of times on Android.
+
+Use a dedicated kmem_cache pool and avoid costly dynamic memory allocations.
+
+Signed-off-by: Park Ju Hyung <qkrwngud825@gmail.com>
+Change-Id: Id0c0c8dfbd835fabf7b13ab9e97322cf6868802c
+Signed-off-by: chrisl7 <wandersonrodriguesf1@gmail.com>
+
+----- 旧 0073：dma_buf: use kmem_cache pool for struct dma_buf_attachment -----
+Author: Park Ju Hyung <qkrwngud825@gmail.com>
+
+These get allocated and freed millions of times on this kernel tree.
+
+Use a dedicated kmem_cache pool and avoid costly dynamic memory allocations.
+
+Signed-off-by: Park Ju Hyung <qkrwngud825@gmail.com>
+Signed-off-by: hazepynut <naden.hey@gmail.com>
+Signed-off-by: bachnxuan <bachnxuan@gmail.com>
+
+----- 旧 0074：dma_buf: use kmem_cache pool for struct sync_file -----
+Author: Park Ju Hyung <qkrwngud825@gmail.com>
+
+These get allocated and freed millions of times on this kernel tree.
+
+Use a dedicated kmem_cache pool and avoid costly dynamic memory allocations.
+
+Signed-off-by: Park Ju Hyung <qkrwngud825@gmail.com>
+---
+ drivers/dma-buf/dma-buf.c   | 15 +++++++++++----
+ drivers/dma-buf/sync_file.c | 12 +++++++++---
+ fs/kernfs/file.c            | 24 ++++++++++++++++++------
+ fs/kernfs/kernfs-internal.h |  1 +
+ fs/kernfs/mount.c           |  2 ++
+ init/main.c                 |  4 ++++
+ kernel/cgroup/cgroup.c      | 12 ++++++++----
+ 7 files changed, 53 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/dma-buf/dma-buf.c b/drivers/dma-buf/dma-buf.c
+index da4f934f9..161ebef37 100644
+--- a/drivers/dma-buf/dma-buf.c
++++ b/drivers/dma-buf/dma-buf.c
+@@ -31,6 +31,13 @@
+ 
+ #include "dma-buf-sysfs-stats.h"
+ 
++static struct kmem_cache *kmem_attach_pool;
++
++void __init init_dma_buf_kmem_pool(void)
++{
++	kmem_attach_pool = KMEM_CACHE(dma_buf_attachment, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
++}
++
+ struct dma_buf_list {
+ 	struct list_head head;
+ 	struct mutex lock;
+@@ -761,8 +768,8 @@ dma_buf_dynamic_attach(struct dma_buf *dmabuf, struct device *dev,
+ 	if (WARN_ON(importer_ops && !importer_ops->move_notify))
+ 		return ERR_PTR(-EINVAL);
+ 
+-	attach = kzalloc(sizeof(*attach), GFP_KERNEL);
+-	if (!attach)
++	attach = kmem_cache_zalloc(kmem_attach_pool, GFP_KERNEL);
++	if (attach == NULL)
+ 		return ERR_PTR(-ENOMEM);
+ 
+ 	attach->dev = dev;
+@@ -812,7 +819,7 @@ dma_buf_dynamic_attach(struct dma_buf *dmabuf, struct device *dev,
+ 	return attach;
+ 
+ err_attach:
+-	kfree(attach);
++	kmem_cache_free(kmem_attach_pool, attach);
+ 	return ERR_PTR(ret);
+ 
+ err_unpin:
+@@ -874,7 +881,7 @@ void dma_buf_detach(struct dma_buf *dmabuf, struct dma_buf_attachment *attach)
+ 	if (dmabuf->ops->detach)
+ 		dmabuf->ops->detach(dmabuf, attach);
+ 
+-	kfree(attach);
++	kmem_cache_free(kmem_attach_pool, attach);
+ }
+ EXPORT_SYMBOL_GPL(dma_buf_detach);
+ 
+diff --git a/drivers/dma-buf/sync_file.c b/drivers/dma-buf/sync_file.c
+index eca7eccb9..48d19fb19 100644
+--- a/drivers/dma-buf/sync_file.c
++++ b/drivers/dma-buf/sync_file.c
+@@ -19,12 +19,18 @@
+ #include <uapi/linux/sync_file.h>
+ 
+ static const struct file_operations sync_file_fops;
++static struct kmem_cache *kmem_sync_file_pool;
++
++void __init init_sync_kmem_pool(void)
++{
++	kmem_sync_file_pool = KMEM_CACHE(sync_file, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
++}
+ 
+ static struct sync_file *sync_file_alloc(void)
+ {
+ 	struct sync_file *sync_file;
+ 
+-	sync_file = kzalloc(sizeof(*sync_file), GFP_KERNEL);
++	sync_file = kmem_cache_zalloc(kmem_sync_file_pool, GFP_KERNEL);
+ 	if (!sync_file)
+ 		return NULL;
+ 
+@@ -40,7 +46,7 @@ static struct sync_file *sync_file_alloc(void)
+ 	return sync_file;
+ 
+ err:
+-	kfree(sync_file);
++	kmem_cache_free(kmem_sync_file_pool, sync_file);
+ 	return NULL;
+ }
+ 
+@@ -152,7 +158,7 @@ static int sync_file_release(struct inode *inode, struct file *file)
+ 	if (test_bit(POLL_ENABLED, &sync_file->flags))
+ 		dma_fence_remove_callback(sync_file->fence, &sync_file->cb);
+ 	dma_fence_put(sync_file->fence);
+-	kfree(sync_file);
++	kmem_cache_free(kmem_sync_file_pool, sync_file);
+ 
+ 	return 0;
+ }
+diff --git a/fs/kernfs/file.c b/fs/kernfs/file.c
+index c8f35fbc9..85326d231 100644
+--- a/fs/kernfs/file.c
++++ b/fs/kernfs/file.c
+@@ -39,6 +39,15 @@ struct kernfs_open_node {
+ 	struct list_head	files; /* goes through kernfs_open_file.list */
+ };
+ 
++static struct kmem_cache *kmem_open_node_pool;
++static struct kmem_cache *kmem_open_file_pool;
++
++void __init init_kernfs_file_pool(void)
++{
++	kmem_open_node_pool = KMEM_CACHE(kernfs_open_node, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
++	kmem_open_file_pool = KMEM_CACHE(kernfs_open_file, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
++}
++
+ /*
+  * kernfs_notify() may be called from any context and bounces notifications
+  * through a work item.  To minimize space overhead in kernfs_node, the
+@@ -549,12 +558,13 @@ static int kernfs_get_open_node(struct kernfs_node *kn,
+ 	mutex_unlock(&kernfs_open_file_mutex);
+ 
+ 	if (on) {
+-		kfree(new_on);
++		if (new_on)
++			kmem_cache_free(kmem_open_node_pool, new_on);
+ 		return 0;
+ 	}
+ 
+ 	/* not there, initialize a new one and retry */
+-	new_on = kmalloc(sizeof(*new_on), GFP_KERNEL);
++	new_on = kmem_cache_alloc(kmem_open_node_pool, GFP_KERNEL);
+ 	if (!new_on)
+ 		return -ENOMEM;
+ 
+@@ -596,7 +606,8 @@ static void kernfs_put_open_node(struct kernfs_node *kn,
+ 	spin_unlock_irqrestore(&kernfs_open_node_lock, flags);
+ 	mutex_unlock(&kernfs_open_file_mutex);
+ 
+-	kfree(on);
++	if (on)
++		kmem_cache_free(kmem_open_node_pool, on);
+ }
+ 
+ static int kernfs_fop_open(struct inode *inode, struct file *file)
+@@ -630,7 +641,7 @@ static int kernfs_fop_open(struct inode *inode, struct file *file)
+ 
+ 	/* allocate a kernfs_open_file for the file */
+ 	error = -ENOMEM;
+-	of = kzalloc(sizeof(struct kernfs_open_file), GFP_KERNEL);
++	of = kmem_cache_zalloc(kmem_open_file_pool, GFP_KERNEL);
+ 	if (!of)
+ 		goto err_out;
+ 
+@@ -721,7 +732,7 @@ static int kernfs_fop_open(struct inode *inode, struct file *file)
+ 	seq_release(inode, file);
+ err_free:
+ 	kfree(of->prealloc_buf);
+-	kfree(of);
++	kmem_cache_free(kmem_open_file_pool, of);
+ err_out:
+ 	kernfs_put_active(kn);
+ 	return error;
+@@ -765,7 +776,8 @@ static int kernfs_fop_release(struct inode *inode, struct file *filp)
+ 	kernfs_put_open_node(kn, of);
+ 	seq_release(inode, filp);
+ 	kfree(of->prealloc_buf);
+-	kfree(of);
++	if (of)
++		kmem_cache_free(kmem_open_file_pool, of);
+ 
+ 	return 0;
+ }
+diff --git a/fs/kernfs/kernfs-internal.h b/fs/kernfs/kernfs-internal.h
+index 7ee97ef59..0a5c81a6d 100644
+--- a/fs/kernfs/kernfs-internal.h
++++ b/fs/kernfs/kernfs-internal.h
+@@ -117,6 +117,7 @@ struct kernfs_node *kernfs_new_node(struct kernfs_node *parent,
+  */
+ extern const struct file_operations kernfs_file_fops;
+ 
++void __init init_kernfs_file_pool(void);
+ void kernfs_drain_open_files(struct kernfs_node *kn);
+ 
+ /*
+diff --git a/fs/kernfs/mount.c b/fs/kernfs/mount.c
+index 9dc7e7a64..25657a6a9 100644
+--- a/fs/kernfs/mount.c
++++ b/fs/kernfs/mount.c
+@@ -386,6 +386,8 @@ void kernfs_kill_sb(struct super_block *sb)
+ 
+ void __init kernfs_init(void)
+ {
++	init_kernfs_file_pool();
++
+ 	kernfs_node_cache = kmem_cache_create("kernfs_node_cache",
+ 					      sizeof(struct kernfs_node),
+ 					      0, SLAB_PANIC, NULL);
+diff --git a/init/main.c b/init/main.c
+index 98d090973..3cb0e49fa 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -814,6 +814,8 @@ void __init __weak arch_call_rest_init(void)
+ 	rest_init();
+ }
+ 
++void __init init_sync_kmem_pool(void);
++void __init init_dma_buf_kmem_pool(void);
+ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
+ {
+ 	char *command_line;
+@@ -1006,6 +1008,8 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
+ 	cgroup_init();
+ 	taskstats_init_early();
+ 	delayacct_init();
++	init_sync_kmem_pool();
++	init_dma_buf_kmem_pool();
+ 
+ 	acpi_subsystem_init();
+ 	arch_post_acpi_subsys_init();
+diff --git a/kernel/cgroup/cgroup.c b/kernel/cgroup/cgroup.c
+index 02d3c5869..736a27ed7 100644
+--- a/kernel/cgroup/cgroup.c
++++ b/kernel/cgroup/cgroup.c
+@@ -763,6 +763,8 @@ EXPORT_SYMBOL_GPL(of_css);
+ 			;						\
+ 		else
+ 
++static struct kmem_cache *cgrp_cset_link_pool;
++
+ /*
+  * The default css_set - used by init and its children prior to any
+  * hierarchies being mounted. It contains a pointer to the root state
+@@ -1009,7 +1011,7 @@ void put_css_set_locked(struct css_set *cset)
+ 		list_del(&link->cgrp_link);
+ 		if (cgroup_parent(link->cgrp))
+ 			cgroup_put(link->cgrp);
+-		kfree(link);
++		kmem_cache_free(cgrp_cset_link_pool, link);
+ 	}
+ 
+ 	if (css_set_threaded(cset)) {
+@@ -1161,7 +1163,7 @@ static void free_cgrp_cset_links(struct list_head *links_to_free)
+ 
+ 	list_for_each_entry_safe(link, tmp_link, links_to_free, cset_link) {
+ 		list_del(&link->cset_link);
+-		kfree(link);
++		kmem_cache_free(cgrp_cset_link_pool, link);
+ 	}
+ }
+ 
+@@ -1181,7 +1183,7 @@ static int allocate_cgrp_cset_links(int count, struct list_head *tmp_links)
+ 	INIT_LIST_HEAD(tmp_links);
+ 
+ 	for (i = 0; i < count; i++) {
+-		link = kzalloc(sizeof(*link), GFP_KERNEL);
++		link = kmem_cache_zalloc(cgrp_cset_link_pool, GFP_KERNEL);
+ 		if (!link) {
+ 			free_cgrp_cset_links(tmp_links);
+ 			return -ENOMEM;
+@@ -1401,7 +1403,7 @@ static void cgroup_destroy_root(struct cgroup_root *root)
+ 	list_for_each_entry_safe(link, tmp_link, &cgrp->cset_links, cset_link) {
+ 		list_del(&link->cset_link);
+ 		list_del(&link->cgrp_link);
+-		kfree(link);
++		kmem_cache_free(cgrp_cset_link_pool, link);
+ 	}
+ 
+ 	spin_unlock_irq(&css_set_lock);
+@@ -5987,6 +5989,8 @@ int __init cgroup_init(void)
+ 	struct cgroup_subsys *ss;
+ 	int ssid;
+ 
++	cgrp_cset_link_pool = KMEM_CACHE(cgrp_cset_link, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
++
+ 	BUILD_BUG_ON(CGROUP_SUBSYS_COUNT > 16);
+ 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_base_files));
+ 	BUG_ON(cgroup_init_cftypes(NULL, cgroup1_base_files));

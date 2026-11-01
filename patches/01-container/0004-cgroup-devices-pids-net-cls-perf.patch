@@ -1,4 +1,4 @@
-From d410b43effe3dfa7cff6a20312a4bc4e94c9fc2d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:55 +0800
 Subject: [PATCH] cgroup: enable devices, pids, net_cls and perf with ABI-safe
@@ -1082,6 +1082,3 @@ index 5e8cd2c6a..9cffe65d2 100644
  	}
  #endif
  
--- 
-2.43.0
-

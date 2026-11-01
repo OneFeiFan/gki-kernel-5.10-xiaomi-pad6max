@@ -1,0 +1,289 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OneFeiFan <3022504358@qq.com>
+Date: Sun, 1 Nov 2026 18:00:00 +0800
+Subject: [PATCH] treewide: use copy_page()/clear_page() for whole pages
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This patch consolidates the following patches of the r16 series
+(original authors are kept in the attached commit messages):
+
+- 旧 0075：zram: use copy_page for full page copy（Mark-PK Tsai）
+- 旧 0076：zsmalloc: use copy_page for full page copy（Mark-PK Tsai）
+- 旧 0077：f2fs: use copy_page for full page copy（ztc1997）
+- 旧 0078：treewide: Optimize page clearing by replacing memset with clear_page（ztc1997）
+- 旧 0079：arm64: Align clear_page() to 16 bytes（Sultan Alsawaf）
+
+Origin: zram、zsmalloc：Mark-PK Tsai 的上游改动，经 ztc1997 2e68e9f9d8、30c861f9c1（旧 0075、0076）；f2fs：ztc1997 a005e0a2eb（旧 0077）；treewide clear_page：ztc1997 5078276692（旧 0078）；arm64 clear_page 对齐：ztc1997 95018d48f0（旧 0079）
+Upstream-Status: Mixed（zram/zsmalloc 为上游，其余为 ztc1997）
+KABI: none
+Depends-On: none
+Notes: 旧 0075–0079 合并；clear_page() 的 7 个调用点都已核对为页对齐地址；zram 只改 __zram_bvec_read() 的满页分支
+Tested-On: r16（2026-11-01）：完整构建、KMI 门禁（7298 个导出符号，缺失 0，CRC 差异 0；670 个厂商模块 0 失败）、开机
+
+Original commit messages:
+
+----- 旧 0075：zram: use copy_page for full page copy -----
+Author: Mark-PK Tsai <mark-pk.tsai@mediatek.com>
+
+Some architectures, such as arm, have implemented optimized copy_page for
+full page copying.
+
+Replace the full page memcpy with copy_page to take advantage of the
+optimization.
+
+Link: https://lkml.kernel.org/r/20231007070554.8657-1-mark-pk.tsai@mediatek.com
+Signed-off-by: Mark-PK Tsai <mark-pk.tsai@mediatek.com>
+Reviewed-by: Sergey Senozhatsky <senozhatsky@chromium.org>
+Cc: AngeloGioacchino Del Regno <angelogioacchino.delregno@collabora.com>
+Cc: Jens Axboe <axboe@kernel.dk>
+Cc: Matthias Brugger <matthias.bgg@gmail.com>
+Cc: Minchan Kim <minchan@kernel.org>
+Cc: YJ Chiang <yj.chiang@mediatek.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+
+----- 旧 0076：zsmalloc: use copy_page for full page copy -----
+Author: Mark-PK Tsai <mark-pk.tsai@mediatek.com>
+
+Some architectures have implemented optimized copy_page for full page
+copying, such as arm.
+
+On my arm platform, use the copy_page helper for single page copying is
+about 10 percent faster than memcpy.
+
+Link: https://lkml.kernel.org/r/20231006060245.7411-1-mark-pk.tsai@mediatek.com
+Signed-off-by: Mark-PK Tsai <mark-pk.tsai@mediatek.com>
+Reviewed-by: Sergey Senozhatsky <senozhatsky@chromium.org>
+Cc: AngeloGioacchino Del Regno <angelogioacchino.delregno@collabora.com>
+Cc: Matthias Brugger <matthias.bgg@gmail.com>
+Cc: Minchan Kim <minchan@kernel.org>
+Cc: YJ Chiang <yj.chiang@mediatek.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+
+----- 旧 0077：f2fs: use copy_page for full page copy -----
+Author: ztc1997 <dev@ztc1997.com>
+
+----- 旧 0078：treewide: Optimize page clearing by replacing memset with clear_page -----
+Author: ztc1997 <dev@ztc1997.com>
+
+----- 旧 0079：arm64: Align clear_page() to 16 bytes -----
+Author: Sultan Alsawaf <sultan@kerneltoast.com>
+
+With automatic zeroing of pages upon allocation enabled, time spent in
+clear_page() is significant according to perf top. Since clear_page() is
+used in loops, align it to 16 bytes, which significantly reduces CPU time
+spent in clear_page()
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ arch/arm64/lib/clear_page.S                      | 1 +
+ arch/arm64/mm/mmu.c                              | 2 +-
+ drivers/block/zram/zram_drv.c                    | 2 +-
+ drivers/staging/android/ion/heaps/ion_cma_heap.c | 2 +-
+ fs/ext4/super.c                                  | 2 +-
+ fs/f2fs/checkpoint.c                             | 2 +-
+ fs/f2fs/compress.c                               | 2 +-
+ fs/f2fs/f2fs.h                                   | 2 +-
+ fs/f2fs/node.c                                   | 2 +-
+ fs/f2fs/segment.c                                | 8 ++++----
+ fs/f2fs/segment.h                                | 2 +-
+ kernel/trace/tracing_map.c                       | 2 +-
+ mm/zsmalloc.c                                    | 2 +-
+ 13 files changed, 16 insertions(+), 15 deletions(-)
+
+diff --git a/arch/arm64/lib/clear_page.S b/arch/arm64/lib/clear_page.S
+index 1fd5d790a..931dd4be6 100644
+--- a/arch/arm64/lib/clear_page.S
++++ b/arch/arm64/lib/clear_page.S
+@@ -14,6 +14,7 @@
+  * Parameters:
+  *	x0 - dest
+  */
++	.p2align 4
+ SYM_FUNC_START_PI(clear_page)
+ 	mrs	x1, dczid_el0
+ 	tbnz	x1, #4, 2f	/* Branch if DC ZVA is prohibited */
+diff --git a/arch/arm64/mm/mmu.c b/arch/arm64/mm/mmu.c
+index 0199c7d6f..d1205fc17 100644
+--- a/arch/arm64/mm/mmu.c
++++ b/arch/arm64/mm/mmu.c
+@@ -106,7 +106,7 @@ static phys_addr_t __init early_pgtable_alloc(int shift)
+ 	 */
+ 	ptr = pte_set_fixmap(phys);
+ 
+-	memset(ptr, 0, PAGE_SIZE);
++	clear_page(ptr);
+ 
+ 	/*
+ 	 * Implicit barriers also ensure the zeroed page is visible to the page
+diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
+index 488e4b4cc..57dbce22b 100644
+--- a/drivers/block/zram/zram_drv.c
++++ b/drivers/block/zram/zram_drv.c
+@@ -1283,7 +1283,7 @@ static int __zram_bvec_read(struct zram *zram, struct page *page, u32 index,
+ 	src = zs_map_object(zram->mem_pool, handle, ZS_MM_RO);
+ 	if (size == PAGE_SIZE) {
+ 		dst = kmap_atomic(page);
+-		memcpy(dst, src, PAGE_SIZE);
++		copy_page(dst, src);
+ 		kunmap_atomic(dst);
+ 		ret = 0;
+ 	} else {
+diff --git a/drivers/staging/android/ion/heaps/ion_cma_heap.c b/drivers/staging/android/ion/heaps/ion_cma_heap.c
+index 6ba7fd84c..e3e795b07 100644
+--- a/drivers/staging/android/ion/heaps/ion_cma_heap.c
++++ b/drivers/staging/android/ion/heaps/ion_cma_heap.c
+@@ -49,7 +49,7 @@ static int ion_cma_allocate(struct ion_heap *heap, struct ion_buffer *buffer,
+ 		while (nr_clear_pages > 0) {
+ 			void *vaddr = kmap_atomic(page);
+ 
+-			memset(vaddr, 0, PAGE_SIZE);
++			clear_page(vaddr);
+ 			kunmap_atomic(vaddr);
+ 			page++;
+ 			nr_clear_pages--;
+diff --git a/fs/ext4/super.c b/fs/ext4/super.c
+index b13130af2..8a5f418b0 100644
+--- a/fs/ext4/super.c
++++ b/fs/ext4/super.c
+@@ -3958,7 +3958,7 @@ int ext4_calculate_overhead(struct super_block *sb)
+ 		blks = count_overhead(sb, i, buf);
+ 		overhead += blks;
+ 		if (blks)
+-			memset(buf, 0, PAGE_SIZE);
++			clear_page(buf);
+ 		cond_resched();
+ 	}
+ 
+diff --git a/fs/f2fs/checkpoint.c b/fs/f2fs/checkpoint.c
+index 0484229f4..db63f19ef 100644
+--- a/fs/f2fs/checkpoint.c
++++ b/fs/f2fs/checkpoint.c
+@@ -1405,7 +1405,7 @@ static void commit_checkpoint(struct f2fs_sb_info *sbi,
+ 
+ 	f2fs_wait_on_page_writeback(page, META, true, true);
+ 
+-	memcpy(page_address(page), src, PAGE_SIZE);
++	copy_page(page_address(page), src);
+ 
+ 	set_page_dirty(page);
+ 	if (unlikely(!clear_page_dirty_for_io(page)))
+diff --git a/fs/f2fs/compress.c b/fs/f2fs/compress.c
+index 342185156..87a6d2157 100644
+--- a/fs/f2fs/compress.c
++++ b/fs/f2fs/compress.c
+@@ -1816,7 +1816,7 @@ void f2fs_cache_compressed_page(struct f2fs_sb_info *sbi, struct page *page,
+ 	if (!f2fs_is_valid_blkaddr(sbi, blkaddr, DATA_GENERIC_ENHANCE_READ))
+ 		goto out;
+ 
+-	memcpy(page_address(cpage), page_address(page), PAGE_SIZE);
++	copy_page(page_address(cpage), page_address(page));
+ 	SetPageUptodate(cpage);
+ out:
+ 	f2fs_put_page(cpage, 1);
+diff --git a/fs/f2fs/f2fs.h b/fs/f2fs/f2fs.h
+index d1cdc2e4f..138b73fb9 100644
+--- a/fs/f2fs/f2fs.h
++++ b/fs/f2fs/f2fs.h
+@@ -2709,7 +2709,7 @@ static inline void f2fs_copy_page(struct page *src, struct page *dst)
+ 	char *src_kaddr = kmap(src);
+ 	char *dst_kaddr = kmap(dst);
+ 
+-	memcpy(dst_kaddr, src_kaddr, PAGE_SIZE);
++	copy_page(dst_kaddr, src_kaddr);
+ 	kunmap(dst);
+ 	kunmap(src);
+ }
+diff --git a/fs/f2fs/node.c b/fs/f2fs/node.c
+index b19ac26c8..e86d726d8 100644
+--- a/fs/f2fs/node.c
++++ b/fs/f2fs/node.c
+@@ -157,7 +157,7 @@ static struct page *get_next_nat_page(struct f2fs_sb_info *sbi, nid_t nid)
+ 
+ 	src_addr = page_address(src_page);
+ 	dst_addr = page_address(dst_page);
+-	memcpy(dst_addr, src_addr, PAGE_SIZE);
++	copy_page(dst_addr, src_addr);
+ 	set_page_dirty(dst_page);
+ 	f2fs_put_page(src_page, 1);
+ 
+diff --git a/fs/f2fs/segment.c b/fs/f2fs/segment.c
+index b62b306bd..227d50ac7 100644
+--- a/fs/f2fs/segment.c
++++ b/fs/f2fs/segment.c
+@@ -2432,7 +2432,7 @@ void f2fs_update_meta_page(struct f2fs_sb_info *sbi,
+ {
+ 	struct page *page = f2fs_grab_meta_page(sbi, blk_addr);
+ 
+-	memcpy(page_address(page), src, PAGE_SIZE);
++	copy_page(page_address(page), src);
+ 	set_page_dirty(page);
+ 	f2fs_put_page(page, 1);
+ }
+@@ -2452,7 +2452,7 @@ static void write_current_sum_page(struct f2fs_sb_info *sbi,
+ 	struct f2fs_summary_block *dst;
+ 
+ 	dst = (struct f2fs_summary_block *)page_address(page);
+-	memset(dst, 0, PAGE_SIZE);
++	clear_page(dst);
+ 
+ 	mutex_lock(&curseg->curseg_mutex);
+ 
+@@ -3990,7 +3990,7 @@ static void write_compacted_summaries(struct f2fs_sb_info *sbi, block_t blkaddr)
+ 
+ 	page = f2fs_grab_meta_page(sbi, blkaddr++);
+ 	kaddr = (unsigned char *)page_address(page);
+-	memset(kaddr, 0, PAGE_SIZE);
++	clear_page(kaddr);
+ 
+ 	/* Step 1: write nat cache */
+ 	seg_i = CURSEG_I(sbi, CURSEG_HOT_DATA);
+@@ -4016,7 +4016,7 @@ static void write_compacted_summaries(struct f2fs_sb_info *sbi, block_t blkaddr)
+ 			if (!page) {
+ 				page = f2fs_grab_meta_page(sbi, blkaddr++);
+ 				kaddr = (unsigned char *)page_address(page);
+-				memset(kaddr, 0, PAGE_SIZE);
++				clear_page(kaddr);
+ 				written_size = 0;
+ 			}
+ 			summary = (struct f2fs_summary *)(kaddr + written_size);
+diff --git a/fs/f2fs/segment.h b/fs/f2fs/segment.h
+index c3618fafe..10a42e532 100644
+--- a/fs/f2fs/segment.h
++++ b/fs/f2fs/segment.h
+@@ -416,7 +416,7 @@ static inline void seg_info_to_sit_page(struct f2fs_sb_info *sbi,
+ 	int i;
+ 
+ 	raw_sit = (struct f2fs_sit_block *)page_address(page);
+-	memset(raw_sit, 0, PAGE_SIZE);
++	clear_page(raw_sit);
+ 	for (i = 0; i < end - start; i++) {
+ 		rs = &raw_sit->entries[i];
+ 		se = get_seg_entry(sbi, start + i);
+diff --git a/kernel/trace/tracing_map.c b/kernel/trace/tracing_map.c
+index d90028052..38a158873 100644
+--- a/kernel/trace/tracing_map.c
++++ b/kernel/trace/tracing_map.c
+@@ -292,7 +292,7 @@ static void tracing_map_array_clear(struct tracing_map_array *a)
+ 		return;
+ 
+ 	for (i = 0; i < a->n_pages; i++)
+-		memset(a->pages[i], 0, PAGE_SIZE);
++		clear_page(a->pages[i]);
+ }
+ 
+ static void tracing_map_array_free(struct tracing_map_array *a)
+diff --git a/mm/zsmalloc.c b/mm/zsmalloc.c
+index 170e9b5e1..0d2abc3f3 100644
+--- a/mm/zsmalloc.c
++++ b/mm/zsmalloc.c
+@@ -2014,7 +2014,7 @@ static int zs_page_migrate(struct address_space *mapping, struct page *newpage,
+ 	 * Here, any user cannot access all objects in the zspage so let's move.
+ 	 */
+ 	d_addr = kmap_atomic(newpage);
+-	memcpy(d_addr, s_addr, PAGE_SIZE);
++	copy_page(d_addr, s_addr);
+ 	kunmap_atomic(d_addr);
+ 
+ 	for (addr = s_addr + offset; addr < s_addr + pos;

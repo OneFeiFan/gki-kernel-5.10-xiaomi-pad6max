@@ -1,4 +1,4 @@
-From b07dd922ddc691b00da46345e73b010c7fc97e7e Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:57 +0800
 Subject: [PATCH] ipc: keep ipc_ids stock for CHECKPOINT_RESTORE
@@ -377,6 +377,3 @@ index 5766c61ae..72316a95f 100644
  #ifdef CONFIG_PROC_FS
  void __init ipc_init_proc_interface(const char *path, const char *header,
  		int ids, int (*show)(struct seq_file *, void *));
--- 
-2.43.0
-

@@ -1,4 +1,4 @@
-From 784dd8bf75d761095171c16769048cc050adbeb7 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: OneFeiFan <3022504358@qq.com>
 Date: Thu, 29 Oct 2026 01:52:55 +0800
 Subject: [PATCH] gki_defconfig: enable config-only extras
@@ -53,6 +53,3 @@ index 1144c0040..d9df33fff 100644
  # CONFIG_EFIVAR_FS is not set
  CONFIG_PSTORE=y
  CONFIG_PSTORE_CONSOLE=y
--- 
-2.43.0
-
