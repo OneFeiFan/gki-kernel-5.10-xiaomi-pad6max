@@ -1,11 +1,13 @@
-# 内核补丁
+# 补丁
 
-基线是 AOSP `android12-5.10-lts` 的 `8059ae219630`（2026-10-24）。
+基线是 ACK `android12-5.10-lts` 的 `8059ae219630`（2026-10-24，Linux 5.10.272）。
 
-| 系列 | 补丁数 | 应用后的源码树（不含本目录） |
+| 系列 | 补丁数 | 应用后的源码树 |
 | --- | --- | --- |
-| `series`（通用） | 46 | `f2545102b9ea16eb087e81a0b0f50770173d0063` |
-| `series.xiaomi`（通用 + 小米组） | 48 | `2eaa32fda05643fb9672a89502f46d6b48567141`（yudi 实际构建的树，即仓库 `source/`） |
+| `series` | 46 | `f2545102b9ea16eb087e81a0b0f50770173d0063` |
+| `series.xiaomi` | 48 | `2eaa32fda05643fb9672a89502f46d6b48567141`，即仓库里的 `source/` |
+
+`series` 是通用补丁，`series.xiaomi` 在其后加上只适用于小米设备的两个补丁。yudi 用的是 `series.xiaomi`。
 
 ## 应用
 
@@ -13,48 +15,46 @@
 cd common
 git checkout 8059ae219630
 PATCHES=/path/to/gki-yudi/patches
-while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series.xiaomi"   # 非小米设备用 series
+while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series.xiaomi"
 ```
 
-只查看 diff、不建提交时，把 `git am` 换成 `git apply`。
+只想看改动、不建提交时，把 `git am` 换成 `git apply`。
 
-## 组织原则
+## 组织方式
 
-- **一个功能一个补丁**。功能内部的先后提交都合并在同一个补丁里，补丁说明列出它包含的旧补丁，
-  并在末尾附上全部原始提交说明（作者、出处、改动理由都保留）。上游的 f2fs 稳定版修正例外，
-  保持一个修正一个补丁，便于基线以后自带其中某个时直接删掉。
-- **编号就是应用顺序，也是目录顺序**：`00-platform` 到 `16-rcu`，最后是 `xiaomi/`。
-- **每个功能补丁自带它需要的 `gki_defconfig` 选项**，放在自己的原厂锚点行之后，以 `# yudi:` 注释开头；
-  0001 关闭 `check_defconfig`，因为选项不再是 savedefconfig 的顺序。
-- **说明头**：`Origin`、`Upstream-Status`、`KABI`、`Depends-On`、`Notes`、`Tested-On` 给出处、KABI 占用、
-  与来源的差异和验证范围；找不到来源的写明"本地实现"。
+一个功能一个补丁。属于同一功能的多个上游提交合并在同一个补丁里，补丁说明列出它包含的原始提交，并在末尾附上这些提交的原始说明。f2fs 的上游修正例外，每个修正单独一个补丁，以后基线自带了某个修正时可以直接删掉。
+
+补丁编号就是应用顺序，也和目录顺序一致：`00-platform` 到 `16-rcu`，最后是 `xiaomi/`。
+
+每个补丁自带它需要的 `gki_defconfig` 选项，写在原厂对应选项的后面，用 `# yudi:` 注释标出。因为选项不再按 savedefconfig 的顺序排列，0001 关闭了 `check_defconfig`。
+
+补丁说明头的字段（`Origin`、`Upstream-Status`、`KABI`、`Depends-On`、`Notes`、`Tested-On`）写明出处、与来源的差异、KABI 预留字段的占用、依赖和验证范围。格式见 [docs/writing-guide.md](../docs/writing-guide.md)。
 
 ## 依赖
 
-2026-11-01 对 48 个补丁逐一做了"去掉一个、打其余全部"的验证，只有下面几处真实依赖：
+除下表外，任何一个补丁都可以单独去掉，其余补丁照样能打上。这是逐个去掉 48 个补丁实测得出的。
 
 | 补丁 | 依赖 | 原因 |
 | --- | --- | --- |
-| 0009 futex_waitv | 0008 epoll_pwait2 | 共享系统调用表 |
-| 0025 zstd | 0015 LZ4K/LZ4KD | `lib/Kconfig` |
-| 0042 zero-sized extent | 0041 map next extent | 0042 基于 0041 的映射修正 |
-| 0048 mfz | 0047 ExtM | 同一个驱动 |
-| 0047 ExtM | 0016、0017 | 配置依赖：内建 zram 与 `ZRAM_WRITEBACK`（补丁本身能单独打上） |
+| 0009 futex_waitv | 0008 epoll_pwait2 | 共用系统调用表 |
+| 0025 zstd | 0015 LZ4K/LZ4KD | 修改了同一处 `lib/Kconfig` |
+| 0042 f2fs 零长度区段 | 0041 f2fs 区段映射 | 基于 0041 的改动 |
+| 0048 内存冻结 | 0047 ExtM | 同一个驱动 |
+| 0047 ExtM | 0016、0017 | 需要内建 zram 和 `ZRAM_WRITEBACK`，补丁本身可以单独打上 |
 
-其余补丁都可以单独去掉。0005 的 `NET_CLS_CGROUP` 依赖 0004 的 `CGROUP_NET_CLASSID`；去掉 0004 时
-Kconfig 会自动丢掉它。
+另外，0005 的 `NET_CLS_CGROUP` 依赖 0004 的 `CGROUP_NET_CLASSID`；去掉 0004 时，Kconfig 会自动去掉它。
 
-## 补丁列表
+## 列表
 
-| 序号 | 补丁 | 内容 | r16 旧编号 |
+| 序号 | 补丁 | 内容 | r16 编号 |
 | --- | --- | --- | --- |
 | 0001 | `00-platform/0001-build-thinlto-defconfig-check.patch` | ThinLTO；关闭 `check_defconfig` | 0001 |
 | 0002 | `00-platform/0002-platform-task-user-abi.patch` | task_struct/user_struct 的 KABI 占位；PID_NS、SYSVIPC、POSIX_MQUEUE、IPC_NS、USER_NS、DEVTMPFS | 0002 |
 | 0003 | `00-platform/0003-gki-defconfig-config-only-extras.patch` | 只改配置：KSM、tmpfs xattr/ACL、Btrfs | 0003 |
 | 0004 | `01-container/0004-cgroup-devices-pids-net-cls-perf.patch` | cgroup MAIN/EXT 拆分；devices、pids、perf、net_cls | 0004 |
 | 0005 | `01-container/0005-container-networking.patch` | 容器网络，含 netns_ipv4 的 l3mdev 布局和断言；nftables、bridge netfilter、IPv6 NAT、IPVS/SCTP、隧道、虚拟网卡、tc | 0005 |
-| 0006 | `01-container/0006-block-throttling-abireserve.patch` | blk-throttle 状态放进 KABI 预留位（本地实现，无外部出处）；BLK_DEV_THROTTLING | 0006 |
-| 0007 | `01-container/0007-checkpoint-restore-ipc-next-id.patch` | ipc next_id 放进 side table（本地实现，无外部出处）；CHECKPOINT_RESTORE、UNIX/PACKET/NETLINK_DIAG、FHANDLE | 0007 |
+| 0006 | `01-container/0006-block-throttling-abireserve.patch` | blk-throttle 状态放进 KABI 预留位，本地实现；BLK_DEV_THROTTLING | 0006 |
+| 0007 | `01-container/0007-checkpoint-restore-ipc-next-id.patch` | ipc next_id 放进独立的表，本地实现；CHECKPOINT_RESTORE、UNIX/PACKET/NETLINK_DIAG、FHANDLE | 0007 |
 | 0008 | `02-wine/0008-epoll-pwait2.patch` | epoll_pwait2 回移（上游提交 7cdf7c20e971 等） | 0008 |
 | 0009 | `02-wine/0009-futex-waitv.patch` | futex_waitv（64/32 位）回移；更新 syscall 表，`__NR_syscalls` 到 450 | 0009 |
 | 0010 | `02-wine/0010-ntsync.patch` | NTSync 驱动；NTSYNC | 0010 |
@@ -69,7 +69,7 @@ Kconfig 会自动丢掉它。
 | 0019 | `06-network/0019-tcp-bbrv3.patch` | BBRv3：TCP 基建（rate sample、32 位时间戳、TLP、CE 事件、`tcp_snd_cwnd`）、PLB、BBRv3 本体与 inet_diag 统计、`gki_defconfig`（默认仍是 cubic） | 0018、0019、0020、0021 |
 | 0020 | `06-network/0020-tcp-cubic-fixes.patch` | tcp_cubic：HyStart 轮次起点修正；`hystart_ack_delay()` 适配 BIG TCP | 0053、0054 |
 | 0021 | `07-block/0021-adios.patch` | ADIOS 3.2.0：blk-mq `limit_depth` 前置（上游 `6259151c04d4`）、调度器本体、修正（去掉错误的 `ELEVATOR_F_MQ_AWARE`，完成请求时跳过 flush/FUA）；默认调度器不变 | 0022、0023、0031 |
-| 0022 | `08-power/0022-wq-power-efficient-default.patch` | 默认启用 power-efficient unbound workqueues（灰度实验） | 0024 |
+| 0022 | `08-power/0022-wq-power-efficient-default.patch` | 默认启用节能的工作队列（`WQ_POWER_EFFICIENT_DEFAULT`） | 0024 |
 | 0023 | `08-power/0023-suspend-keep-cpuidle.patch` | 进入 suspend 时不再关闭 cpuidle；Tim Murray `571508da07` | 0052 |
 | 0024 | `08-power/0024-s2idle-wakeup.patch` | s2idle：避免过多唤醒尝试；`4b81b6afa1` | 0056 |
 | 0025 | `09-lib/0025-zstd-1.5.7.patch` | zstd 升级到 1.5.7；lib/zstd 换成 common/compress/decompress 布局，crypto/f2fs/btrfs/squashfs/incfs/pstore/unzstd 切到新 API；新增 ZSTD_COMMON | 0025 |
@@ -89,7 +89,7 @@ Kconfig 会自动丢掉它。
 | 0039 | `14-f2fs/0039-f2fs-ino-xnid-sanity.patch` | ino/xnid sanity check；`ecff54aa20b5` | 0085 |
 | 0040 | `14-f2fs/0040-f2fs-extent-info-init.patch` | extent_info 初始化；`07523f7dd95d` | 0086 |
 | 0041 | `14-f2fs/0041-f2fs-map-next-extent.patch` | `map->m_next_extent` 修正；`4267734542b0` | 0087 |
-| 0042 | `14-f2fs/0042-f2fs-zero-sized-extent.patch` | zero-sized precache extent；`b133c8ad56cb`，依赖 0087 | 0088 |
+| 0042 | `14-f2fs/0042-f2fs-zero-sized-extent.patch` | zero-sized precache extent；`b133c8ad56cb`，依赖 0041 | 0088 |
 | 0043 | `14-f2fs/0043-f2fs-truncate-first-page.patch` | truncate 错误路径清首页；`28c17b42a27b` | 0089 |
 | 0044 | `15-binder/0044-binder-dbitmap.patch` | binder：用 dbitmap 做 O(1) 描述符查找；新增 `drivers/android/dbitmap.h`；Templar `ba009eabe6` | 0090 |
 | 0045 | `16-rcu/0045-rcu-sync-latency.patch` | RCU：GP kthread 的 CPU 提前报告 QS，缩短 synchronize_rcu()；Joel Fernandes `43de808766` | 0069 |
@@ -97,140 +97,4 @@ Kconfig 会自动丢掉它。
 | 0047 | `xiaomi/0047-zram-xiaomi-extm.patch` | 小米 ExtM zram：分批写回、按时间老化、低压缩率优先写回、页面寿命与大小统计、SIGUSR1 中止写回；含 memcg 文件注册位置修复 | 0027、0029 |
 | 0048 | `xiaomi/0048-zram-xiaomi-memory-freeze.patch` | 小米内存冻结（mfz）写回策略：按 memcg 打标、`mfz_enable`（默认 1）、`mfz_disk_quota`、`mfz_compr_data_size`、`mfz_idle_stat`、`bd_stat` 多三列；memcg 文件 5.10 与 6.6 两套名字 | 0028、0030 |
 
-## 说明
-
-- **zram 内建**：0016 把 zram、zsmalloc、LZO 编进内核并接上 LZ4K/LZ4KD（0015 启用这些算法），厂商的
-  zram.ko / zsmalloc.ko 被内建屏蔽名单跳过；zram 驱动由本仓库维护。0017 打开上游的 `ZRAM_WRITEBACK`。
-- **小米组**：`xiaomi/` 下的补丁只用于小米设备，排在通用系列之后。0047 的来源是
-  `MiCode/Xiaomi_Kernel_OpenSource` 的 `spinel-v-oss`（5.10.233，`49ff345d71ab`），它基于 ACK，已包含本仓库
-  5.10.272 zram 的全部 ACK 改动，因此直接取其 `zram_drv.c`/`zram_drv.h`，再加回 0016 的默认算法配置；
-  小米源码把 memcg 文件的注册写在 `zram_init()` 的 `return 0` 之后，0047 已修正。yudi 自己的开源分支
-  `yudi-t-oss`（5.10.160）里的 zram 是原版，没有 ExtM。0048 的来源是小米 6.6 源码 `bixi-v-oss`
-  （`56295df675b9`）的 `CONFIG_MI_MEMORY_FREEZE` 部分；memcg 标记用 ACK 5.10 已有的
-  `struct mem_cgroup::android_oem_data1`，不改结构体；接口名和取值对照官方 yudi zram.ko，另提供 6.6 的
-  `anno_writeback_control`，因为移植包的 `init.rc` 两套都会写。zram 的 sysfs 接口与官方 yudi zram.ko
-  完全一致（30 个）。
-- **PerfInit 反汇编结论**：`writeback_quota` 是小米的日志笔误（实际检查的是 `mfz_disk_quota`），不需要实现；
-  `zgroup_enable` 是玄戒机型另一套架构（zram 分组 + memcg 级 xswapd）的开关，没有公开源码，**不实现，也不能
-  放空文件**；`mfz_enable` 依赖驱动默认值 1，`mfz_disk_quota` 由 PerfInit 按 `persist.sys.mfz.disk_quota`
-  写入（默认 2048 MB，即 524288 页）。
-- **未纳入的**：menu 空闲调度器系列（在 5.10.272 上冲突）；selinux `167a6e942b`（冲突）；f2fs dnode 检查
-  （本树已有同类检查）；SSG 调度器（短测无一致收益，补丁在 `refs-ssg-2026-11-01/`，不进默认 series）。
-
-## 2026-11-01 整理（r17）
-
-r16 的 103 个补丁按功能合并为 48 个（通用 46 + 小米 2）：
-
-- 合并前后两个系列的源码树逐字节相同（`8f65209b…`、`7f30604d…`），证明只改了切分方式；
-- 合并顺带消除了几处错误切分：旧 0057 单独存在会破坏 KMI（现与其 ABI 修正同在 0031）；RCU 组原先
-  0099 单独不生效、0100 一个补丁做三件事（现为一个 0046）；旧 0070 只有配置（现并入 0032）；
-- 然后只做了一处代码改动：0011 的 OOM 兜底在不能换出时只填充文件页链表，最终树变为上表的新哈希。
-  clang 18.1.3 编译 `mm/vmscan.o` 通过，需重新构建并跑 KMI 门禁（r17）。
-
-旧编号对照：
-
-| r16 旧编号 | r17 新编号 |
-| --- | --- |
-| 0001 | 0001 |
-| 0002 | 0002 |
-| 0003 | 0003 |
-| 0004 | 0004 |
-| 0005 | 0005 |
-| 0006 | 0006 |
-| 0007 | 0007 |
-| 0008 | 0008 |
-| 0009 | 0009 |
-| 0010 | 0010 |
-| 0011 | 0011 |
-| 0012 | 0012 |
-| 0013 | 0013 |
-| 0014 | 0014 |
-| 0015 | 0015 |
-| 0016 | 0016 |
-| 0017 | 0017 |
-| 0018 | 0019 |
-| 0019 | 0019 |
-| 0020 | 0019 |
-| 0021 | 0019 |
-| 0022 | 0021 |
-| 0023 | 0021 |
-| 0024 | 0022 |
-| 0025 | 0025 |
-| 0026 | 0027 |
-| 0027 | 0047 |
-| 0028 | 0048 |
-| 0029 | 0047 |
-| 0030 | 0048 |
-| 0031 | 0021 |
-| 0032 | 0018 |
-| 0033 | 0011 |
-| 0034 | 0029 |
-| 0035 | 0029 |
-| 0036 | 0029 |
-| 0037 | 0029 |
-| 0038 | 0029 |
-| 0039 | 0029 |
-| 0040 | 0029 |
-| 0041 | 0029 |
-| 0042 | 0029 |
-| 0043 | 0029 |
-| 0044 | 0029 |
-| 0045 | 0029 |
-| 0046 | 0029 |
-| 0047 | 0029 |
-| 0048 | 0029 |
-| 0049 | 0029 |
-| 0050 | 0030 |
-| 0051 | 0030 |
-| 0052 | 0023 |
-| 0053 | 0020 |
-| 0054 | 0020 |
-| 0055 | 0028 |
-| 0056 | 0024 |
-| 0057 | 0031 |
-| 0058 | 0031 |
-| 0059 | 0031 |
-| 0060 | 0031 |
-| 0061 | 0031 |
-| 0062 | 0031 |
-| 0063 | 0031 |
-| 0064 | 0031 |
-| 0065 | 0031 |
-| 0066 | 0028 |
-| 0067 | 0028 |
-| 0068 | 0032 |
-| 0069 | 0045 |
-| 0070 | 0032 |
-| 0071 | 0033 |
-| 0072 | 0033 |
-| 0073 | 0033 |
-| 0074 | 0033 |
-| 0075 | 0026 |
-| 0076 | 0026 |
-| 0077 | 0026 |
-| 0078 | 0026 |
-| 0079 | 0026 |
-| 0080 | 0034 |
-| 0081 | 0035 |
-| 0082 | 0036 |
-| 0083 | 0037 |
-| 0084 | 0038 |
-| 0085 | 0039 |
-| 0086 | 0040 |
-| 0087 | 0041 |
-| 0088 | 0042 |
-| 0089 | 0043 |
-| 0090 | 0044 |
-| 0091 | 0046 |
-| 0092 | 0046 |
-| 0093 | 0046 |
-| 0094 | 0046 |
-| 0095 | 0046 |
-| 0096 | 0046 |
-| 0097 | 0046 |
-| 0098 | 0046 |
-| 0099 | 0046 |
-| 0100 | 0046 |
-| 0101 | 0046 |
-| 0102 | 0046 |
-| 0103 | 0046 |
+各功能的说明见 [docs/features.md](../docs/features.md)。r16 的旧编号和新编号的完整对照见 [RENUMBER-r17.md](RENUMBER-r17.md)。

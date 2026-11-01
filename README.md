@@ -1,147 +1,83 @@
-# GKI 5.10.272 for Xiaomi Pad 6 Max
+# yudi GKI 5.10
 
-基于 AOSP `android12-5.10-lts`（ACK `8059ae2`，Linux 5.10.272）的自编译内核，设备是小米平板 6 Max
-（yudi，SM8475）。目标是保持原厂 KMI 不变，同时能跑容器、Droidspaces 和
-Wine/Proton。
+小米平板 6 Max（yudi，骁龙 8+ Gen 1）的 GKI 内核，基于 Android 通用内核 android12-5.10（Linux 5.10.272）。
 
-导出符号布局保持 stock，`vendor_boot` 的 355 个模块和 `vendor_dlkm` 的 315 个
-`.ko` 直接加载。新增功能：
+它和原厂内核的模块接口（KMI）完全兼容：vendor 分区里的驱动模块原样加载，只需刷入 boot 分区。在此之上，它加入了容器、Wine 和内存管理方面的功能。
 
-- 容器：cgroup v1 的 devices/pids/perf/net_cls、nftables、bridge netfilter、
-  IPv6 NAT、IPVS、SCTP、VXLAN/VLAN/IPVLAN/MACVLAN、L2TP/FOU/GRE、tc、
-  blkio 限速、Btrfs、checkpoint/restore、CRIU diag、FHANDLE
-- Wine：NTSync、futex_waitv（64/32 位）、epoll_pwait2
-- 存储与调度：内建 zram 与 LZ4K/LZ4KD、小米 ExtM 与内存冻结（`xiaomi/` 组）、BBRv3、ADIOS、le9uo、CFS 带宽（kABI 拆分）
+## 功能
 
-内核只负责能力和 stock 默认值。BBRv3、zram 算法、KSM、ADIOS、DAMON 这些运行时
-开关由 KernelSU 模块负责。
+- **容器**：Docker、LXC 和 Droidspaces 需要的 cgroup、网络和存储功能，包括按容器限制 CPU 用量（CFS 带宽）、checkpoint/restore 和 nftables。
+- **Wine 和 Proton**：NTSync、futex_waitv 和 epoll_pwait2。
+- **内存**：le9uo 工作集保护、Kcompressd 异步压缩、内建 zram 与 LZ4K/LZ4KD 压缩算法，以及移植自小米开源代码的内存扩展（ExtM）和内存冻结（MFZ）。
+- **网络**：BBRv3 拥塞控制。
+- **存储**：ADIOS 调度器（可选）、zstd 1.5.7、f2fs 的上游修正。
+- **省电**：TEO 空闲调度器的上游改进，RCU 惰性回调（实验性，默认关闭）。
 
-当前还带一个灰度项：`WQ_POWER_EFFICIENT_DEFAULT`。zram 内建并由本仓库维护，小米 ExtM 来自
-小米官方开源源码（`patches/xiaomi/`），与第三方月亮内核完全切割，见 [docs/kernel.md](docs/kernel.md) 与
-[docs/ExtM-research.md](docs/ExtM-research.md)。
+内核保持原厂的默认行为。BBRv3、zram 压缩算法、KSM、ADIOS 等运行时开关由配套的 [yudi-tweaks](https://github.com/OneFeiFan/yudi-ksu-modules) 模块管理。每项功能的作用、默认值和开关方法见 [docs/features.md](docs/features.md)。
 
-cpuidle governor 默认跟随系统（`qcom-cpu-lpm`）；`yudi-tweaks` 2.2 提供 TEO、
-RCU 惰性回调等运行时开关。RCU 惰性回调默认关闭，路径是
-`/sys/module/rcutree/parameters/enable_rcu_lazy`；PELT multiplier 实测无显著
-收益，保持默认 `1`；SSG 只保留可选补丁，默认仍是 cpq。
+## 兼容性
 
-## 生态调研
+- 设备：小米平板 6 Max 14（yudi）。
+- 系统：在 HyperOS 3（Android 16）上使用。设备 vendor 分区来自原厂 OS3.0.6.0。
+- Root：每个版本提供两个镜像，一个集成 KernelSU，一个不带 root。两者内核相同，只有 ramdisk 不同。
 
-2026-10-30 对 10 个方向做了只读盘点，结论和差距见
-[docs/ecosystem-survey.md](docs/ecosystem-survey.md)。只归档，没有据此改内核。
+## 安装
 
-2026-10-31 基线已升到 ACK lts 最新 `8059ae2`。此后 r6–r14 陆续加入正确性修复、
-f2fs 修正、binder 位图查找和 RCU 惰性回调；r16 时共 103 个补丁（通用 99 + 小米 4），树 `7f30604d...`。
-r16 在 r14 基础上加了 SCSI EH 的 `call_rcu_hurry()` 修正；
-r15 是可选的 SSG 临时测试镜像，SSG 不设默认，默认仍是 cpq。
+1. 从 [Releases](https://github.com/OneFeiFan/gki-kernel-5.10-xiaomi-pad6max/releases) 下载镜像：`*-ksu.img` 带 KernelSU，`*-noroot.img` 不带 root。
+2. 先备份当前的 boot 分区，回退时要用。
+3. 刷入当前启动槽位的 boot 分区：
 
-2026-11-01 把 103 个补丁按功能合并为 48 个（通用 46 + 小米 2），合并前后源码树逐字节相同；
-随后 0011 的 le9uo OOM 兜底改为不能换出时只填充文件页链表，r17 树是 `2eaa32fd...`，
-待重新构建并跑门禁。旧编号对照见 [patches/README.md](patches/README.md)。
+   ```sh
+   adb reboot bootloader
+   fastboot getvar current-slot          # 输出 a 或 b
+   fastboot flash boot_a yudi-5.10.272-<日期>-ksu.img   # 槽位是 b 时改为 boot_b
+   fastboot reboot
+   ```
 
-## 仓库结构
+不需要改动 `vendor_boot`、`vendor_dlkm` 或 `dtbo`。
 
-| 目录 | 内容 |
-| --- | --- |
-| `source/` | 内核源码，构建环境里的 `common/` |
-| `patches/` | 相对 5.10.272 的 48 个功能补丁（通用 46 + 小米 2） |
-| `tools/` | 验证脚本：符号、CRC、配置、结构布局 |
-| `docs/` | 构建与验证、设备状态、模块说明、GPU/ExtM 研究、生态调研 |
-
-`source/` 是应用完补丁后的树，不是基线。复现方法见 `patches/README.md`。
+**回退**：用同样的命令刷回备份的 boot 镜像。
 
 ## 构建
 
-`source/` 需要配 AOSP 的 `build/` 和 `prebuilts/`：
+源码在 `source/`，是在基线上应用全部补丁后的完整内核树。补丁本身在 `patches/`。构建和打包镜像的方法见 [docs/building.md](docs/building.md)，发布前的检查见 [docs/verification.md](docs/verification.md)。
 
-```sh
-git clone --branch pad6max https://github.com/OneFeiFan/gki-kernel-5.10-xiaomi-pad6max.git gki-yudi
-mkdir -p ~/kernel-sources/vanilla-root
-cp -a gki-yudi/source ~/kernel-sources/vanilla-root/common
+## 文档
 
-cd ~/kernel-sources/vanilla-root
-SKIP_MRPROPER=1 SKIP_CP_KERNEL_HDR=1 \
-BUILD_CONFIG=common/build.config.gki.aarch64 \
-OUT_DIR=~/kernel-sources/out \
-bash build/build.sh -j12
-```
-
-构建前建议清空 `OUT_DIR`。增量构建会复用 ThinLTO 缓存，`/proc/config.gz`
-可能留在上一次的配置数据上。
-
-硬门禁和测试方法见 [docs/kernel.md](docs/kernel.md)。
-
-## 刷机
-
-每个内核有两个版本（KernelSU / 无 root），内核相同，ramdisk 不同。最后发布的是 r3（2026-10-30）；r4–r16 只在本地构建。
-当前稳定镜像是 r16（r14 + SCSI fix），r14/r15 保留作回退和 SSG 试验（SSG 默认不启用，sda 仍是 cpq）。
-
-| 镜像 | 内容 |
+| 文档 | 内容 |
 | --- | --- |
-| `~/kernel-sources/work/r14-images/yudi-5.10.272-20261101-r14-rcu-ksu.img` | r14 稳定，KernelSU |
-| `~/kernel-sources/work/r14-images/yudi-5.10.272-20261101-r14-rcu-noroot.img` | r14 稳定，无 root |
-| `~/kernel-sources/work/r15-ssg-images/yudi-5.10.272-20261101-r15-ssg-ksu.img` | r15 SSG 可选试验，KernelSU |
-| `~/kernel-sources/work/r15-ssg-images/yudi-5.10.272-20261101-r15-ssg-noroot.img` | r15 SSG 可选试验，无 root |
-| `~/kernel-sources/work/r16-scsi-images/yudi-5.10.272-20261101-r16-scsi-ksu.img` | r16 SCSI fix，KernelSU |
-| `~/kernel-sources/work/r16-scsi-images/yudi-5.10.272-20261101-r16-scsi-noroot.img` | r16 SCSI fix，无 root |
+| [CHANGELOG.md](CHANGELOG.md) | 各版本的改动 |
+| [docs/features.md](docs/features.md) | 功能说明、默认值和开关 |
+| [docs/known-issues.md](docs/known-issues.md) | 已知问题和尚未充分验证的改动 |
+| [docs/building.md](docs/building.md) | 构建内核、打包 boot 镜像 |
+| [docs/verification.md](docs/verification.md) | KMI 门禁和设备上的测试 |
+| [patches/README.md](patches/README.md) | 补丁的组织方式、依赖和列表 |
+| [docs/writing-guide.md](docs/writing-guide.md) | 维护文档时的写作规范 |
+| [docs/notes/](docs/notes/) | 开发过程中的调研和记录 |
 
-```sh
-adb reboot bootloader
-fastboot flash boot_a ~/kernel-sources/work/r16-scsi-images/yudi-5.10.272-20261101-r16-scsi-ksu.img
-fastboot reboot
-```
+## 致谢
 
-只动 `boot_a`。`vendor_boot`、`vendor_dlkm`、`dtbo` 都不需要改。
+本内核汇集了以下项目的工作，具体到每个补丁的出处写在补丁说明里。
 
-## 补丁
+- [Android 通用内核](https://android.googlesource.com/kernel/common/)：android12-5.10 基线；android14-5.15 的 RCU 惰性回调回移。
+- [Linux 内核](https://www.kernel.org/)：大量上游修正与功能回移。
+- [小米开源内核](https://github.com/MiCode/Xiaomi_Kernel_OpenSource)：ExtM 与内存冻结。
+- [KernelSU](https://github.com/tiann/KernelSU)。
+- [SukiSU 补丁集](https://github.com/ShirkNeko/SukiSU_patch)：LZ4K/LZ4KD 与 zram 集成。
+- [kernel-workshop-docker](https://github.com/superturtlee/kernel-workshop-docker)：容器相关补丁、LZ4 1.10 与 ARM64 汇编。
+- [WildKernels](https://github.com/WildKernels/kernel_patches)：BBRv3 与 NTSync 的 5.10 回移。
+- [Droidspaces](https://github.com/Goldzxcbug/Droidspaces_Kernel_patch)：SysV IPC 与 CFS 带宽的 KMI 兼容实现。
+- [le9uo](https://github.com/Star-ZER0/le9uo_android12-5.10)（Star-ZER0）：工作集保护。
+- [ADIOS](https://github.com/firelzrd/adios)（firelzrd）：IO 调度器。
+- [linux-tkg](https://github.com/Frogging-Family/linux-tkg)：futex_waitv 回移。
+- ztc1997 的 [android12-5.10 内核](https://github.com/ztc1997/android_gki_kernel_5.10_common)：zstd 1.5.7、Kcompressd，以及 TEO、f2fs 等大量回移的整理。
+- Pzqqt 的 [Melt 内核](https://github.com/Pzqqt/android_kernel_xiaomi_marble)：Kcompressd 的 KMI 修正、ADIOS 修正、kmem_cache 池、长按电源键同步的移植。
+- Sultan Alsawaf：减少小块分配等一系列小优化。
+- [ESK](https://github.com/ESK-Project/android12-5.10-gki)：kmem_cache 池、zram 缓冲区、挂起时的 cpuidle 改动。
+- [Templar](https://github.com/Steambot12/Templar-Kernel-GKI-5.10)（Steambot12）：binder 位图查找的回移、le9uo 的 OOM 兜底。
+- Panchajanya1999 的 [Pixel 5.10 内核](https://github.com/Panchajanya1999/kernel-5.10)：RCU 惰性回调的 5.10 回移。
+- Juhyung Park（arter97）：长按电源键同步文件系统。
 
-补丁在 `patches/`，基线是 `8059ae2`（ACK `android12-5.10-lts`，2026-10-24）。`series`
-46 条、`series.xiaomi` 48 条（通用 46 + 小米 2），一个功能一个补丁，按子系统分目录
-（`00-platform/` … `16-rcu/`），`series` 决定应用顺序。按 `series` 顺序应用：
+## 许可
 
-```sh
-cd common
-git checkout 8059ae2
-while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series"
-```
-
-## KernelSU 模块
-
-源码和 zip：<https://github.com/OneFeiFan/yudi-ksu-modules>
-
-| 模块 | 说明 |
-| --- | --- |
-| `yudi-tweaks` | 运行时开关和状态页（BBRv3、le9uo、zram、KSM、ADIOS、DAMON、cpuidle governor、RCU 惰性回调） |
-| `ntsync` | 按 `/sys/class/misc/ntsync/dev` 创建 `/dev/ntsync` |
-
-## 验证
-
-以下为 2026-11-01 r16 的快速验证结果；NTSync/futex/epoll 和 CFS/zram 往返是
-2026-10-30 r4 的结果，r16 没有重跑这些用例。详细步骤见 [docs/kernel.md](docs/kernel.md)。
-
-- 7298 个导出符号，缺失 0，CRC 差异 0；670 个 vendor 模块 CRC 不匹配 0
-- 47 项 CONFIG 满足；`cfs_rq` 布局与 stock 一致
-- 设备开机 419 个模块、369 个服务；`dmesg` 无 RCU stall、panic/Oops
-- RCU 开关写 1/0 正常；5000 文件 churn 未见异常；`enable_rcu_lazy` 默认 N
-- 全量 345 个 `call_rcu` 审计完成；当前配置唯一必改的 SCSI EH 已改用 `call_rcu_hurry`
-- NTSync v2 自测 11/11，futex_waitv 7/7，epoll 63/63（r4）
-- CFS 带宽 20% 配额下 `nr_throttled` 正常增长，zram 各算法往返一致（r4）
-
-verify 脚本还有两个已知误报：ipvlan 用例在同一个 dummy 上先建 macvlan 再建
-ipvlan（两者争用 RX handler，必然 EBUSY）；设备自带的 `ss` 是
-iproute2-ss171113，看不到 bbr3 诊断，用 Termux 的 iproute2 7.3.0 可复测。
-
-## 参考
-
-- AOSP `android12-5.10-lts`
-- KernelSU
-- SukiSU Ultra zram（LZ4K/LZ4KD）
-- WildKernels android12-5.10 BBRv3
-- ESK GKI `block/adios.c`
-- le9uo
-- linux-tkg futex_waitv 回移
-- Goldzxcbug/Droidspaces_Kernel_patch（CFS 带宽 kABI 拆分）
-
-## License
-
-GPL-2.0，与上游一致。
+GPL-2.0，与 Linux 内核相同。

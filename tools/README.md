@@ -1,6 +1,6 @@
 # 验证与镜像工具
 
-门禁的用法见 [docs/kernel.md](../docs/kernel.md) 的"门禁"一节。
+门禁的步骤和通过标准见 [docs/verification.md](../docs/verification.md)。
 
 ## KMI 与配置门禁
 
@@ -10,7 +10,7 @@
 | `crc_scan.py` | 批量扫描目录下所有 `.ko` 的 `__versions` CRC 是否与内核 `vmlinux.symvers` 匹配 |
 | `crc_check.py` | 单个模块的 `__versions` CRC 与 `vmlinux.symvers` 对比 |
 | `check_config.py` | 构建出的 `.config` 是否丢了必需的选项 |
-| `abi_layout_check.py` | 关键结构体的偏移和大小是否与 stock 5.10.272 GKI 一致（需要 `pahole`） |
+| `abi_layout_check.py` | 关键结构体的偏移和大小是否与原厂 5.10.272 GKI 一致（需要 `pahole`） |
 | `gencrc.sh` | 用构建目录里记录的编译命令，对单个编译单元跑 cpp + genksyms，定位 CRC 变化的来源 |
 | `bisect_configs.sh` | 按配置分组逐个编译，检查厂商模块 CRC 是否被某组配置破坏 |
 

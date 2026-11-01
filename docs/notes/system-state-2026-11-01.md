@@ -1,8 +1,6 @@
 # 系统状态交接（yudi）
 
-日期：2026-11-01。给后续驱动工作留的现状记录，内核构建和补丁见
-[`kernel.md`](kernel.md) 与仓库 `patches/`。除特别说明外，表中的数值都是
-2026-10-29 到 2026-11-01 的采样值。
+设备、系统和内核项目的状态快照，2026-11-01。除特别说明外，表中的数值都是 2026-10-29 到 2026-11-01 的采样值。内核的构建见 [building.md](../building.md)，补丁见 [patches/README.md](../../patches/README.md)。
 
 ## 设备与系统
 
@@ -16,7 +14,7 @@
 | 内存 | 约 15.9GB |
 | CPU | 8 核，小核 2.016GHz，中核 2.7456GHz，大核 3.1872GHz，`walt` |
 | 启动槽 | `_a`，bootloader 已解锁，SELinux Enforcing |
-| 当前内核 | `5.10.272-android12-9-gca3d938a24e8`（r16，SCSI fix；r15 SSG 试验镜像保留） |
+| 当前内核 | `5.10.272`（r17，本地构建；快照树没有 `.git`，版本串不带提交号；r15/r16 镜像保留） |
 
 两个容易踩的点：
 
@@ -31,11 +29,11 @@
 | 项目 | 值 |
 |---|---|
 | 源码 | `~/kernel-sources/vanilla-root/common` |
-| 分支 | `p0-series-xiaomi-0092-rcu-scsi`（r16）；SSG 可选分支 `ssg-r14` |
-| HEAD | `ca3d938a2`（r16，13 个 RCU 提交）；SSG `ba45f1858` |
-| 构建输出 | `~/kernel-sources/out-xiaomi`（r14）；r15 SSG 构建目录已清理，镜像保留 |
-| 补丁 | 48 个（通用 46 + 小米 2，2026-11-01 按功能合并），基线 `8059ae2`；树 `f2545102` / `2eaa32fd`（r17，待构建）；r16 镜像对应合并前的 `8f65209b` / `7f30604d` |
-| 镜像 | r14/r15/r16 只在本地（未发布）；最后发布的是 r3 |
+| 分支 | `p0-series-xiaomi-0092-rcu-scsi`（r16）；r17 从快照构建；SSG 可选分支 `ssg-r14` |
+| HEAD | `ca3d938a2`（r16，13 个 RCU 提交）；r17 树 `2eaa32fd`；SSG `ba45f1858` |
+| 构建输出 | `~/kernel-sources/out-r17`（r17）；`out-xiaomi`（r14）；r15 SSG 构建目录已清理，镜像保留 |
+| 补丁 | 48 个（通用 46 + 小米 2，2026-11-01 按功能合并），基线 `8059ae2`；树 `f2545102` / `2eaa32fd`（r17）；r16 镜像对应合并前的 `8f65209b` / `7f30604d` |
+| 镜像 | r14/r15/r16/r17 只在本地（未发布）；最后发布的是 r3 |
 | 灰度 | RCU lazy 默认关、可写开关；SSG 仅可选不默认；WQ power efficient；zram 内建 + 小米 ExtM；Kcompressd；governor 默认 qcom-cpu-lpm；PELT multiplier 保持 1 |
 | GitHub | `OneFeiFan/gki-kernel-5.10-xiaomi-pad6max`，`pad6max` 快照分支 |
 | 模块 | yudi-tweaks 2.3（GOV、RCU lazy、实验调参、MFZ 白名单改进）；ntsync 1.1 |
@@ -46,7 +44,7 @@ GKI 内核里没有 `CONFIG_DRM_MSM` 和 `CONFIG_MSM_KGSL`，显示和 GPU 驱�
 vendor 模块提供：
 
 - 模块目录 `/vendor_dlkm/lib/modules`，设备上 315 个 `.ko`
-- 加载模块 419 个
+- 已加载 414 个（423 个不同模块名）
 - GPU 相关：`msm_kgsl.ko`、`msm_drm.ko`、`msm_performance.ko`、`qcom_dcvs`、
   `gpucc_waipio/diwali`、`llcc_qcom`、`mem_buf_dev`、`secure_buffer`、
   `qcom_iommu_util`、`arm_smmu`
@@ -100,11 +98,12 @@ vendor 模块提供：
 - PELT multiplier 1 vs 2 无显著收益，保持 `1`。
 - SSG 短测无一致收益，不设默认、不并入默认 series。
 - SCSI `scsi_eh_scmd_add()` 已改用 `call_rcu_hurry()`（r16），全量审计的必改项已关闭。
+- r17 的 48 个补丁重放后与合并前源码一致，构建、KMI 门禁和刷机验证通过。
 
 ## 待确认
 
 - TEO 8 小时待机 A/B 需要拔掉 USB/充电线重跑；上一轮被 `ssusb` wakelock 阻止 suspend。
-- r15 SSG 临时镜像是否继续保留？当前设备已是 r16。
+- r15 SSG 临时镜像是否继续保留？当前设备已是 r17。
 - 765MHz 上限来自 thermal、perfmgr、DT 还是 `gpulevel`？
 - `persist.sys.force_sw_gles=1` 是调试残留还是实际生效？SurfaceFlinger 当前
   显示 Adreno GLES，倾向于是无效属性。
