@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""检查构建出的 .config 是否缺少必需项。
+"""Fail if a built kernel .config lost a required option.
 
-0001 关掉了 Common/build.sh 里严格的 defconfig 检查，所以每次构建后需要单独
-验证生成的 .config。
+Common/build.sh's defconfig check is skipped by 0002-skip-check_defconfig,
+so verify the generated .config explicitly after every build.
 """
 import sys
 
@@ -52,6 +52,8 @@ REQUIRED = [
     "CONFIG_FUSE_FS",
     "CONFIG_OVERLAY_FS",
     "CONFIG_CFS_BANDWIDTH",
+    "CONFIG_RCU_LAZY",
+    "CONFIG_RCU_LAZY_DEFAULT_OFF",
 ]
 
 FORBIDDEN = [

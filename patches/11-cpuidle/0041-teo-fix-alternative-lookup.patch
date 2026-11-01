@@ -1,0 +1,95 @@
+From b4d6a28454e0aa17dfbe07f1766513518968e806 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Fri, 30 Jul 2021 16:38:07 +0200
+Subject: [PATCH] cpuidle: teo: Fix alternative idle state lookup
+
+There are three mistakes in the loop in teo_select() that is looking
+for an alternative candidate idle state.  First, it should walk all
+of the idle states shallower than the current candidate one,
+including all of the disabled ones, but it terminates after the first
+enabled idle state.  Second, it should not terminate its last step
+if idle state 0 is disabled (which is related to the first issue).
+Finally, it may return the current alternative candidate idle state
+prematurely if the time span criterion is not met by the idle state
+under consideration at the moment.
+
+To address the issues mentioned above, make the loop in question walk
+all of the idle states shallower than the current candidate idle state
+all the way down to idle state 0 and rearrange the checks in it.
+
+Fixes: 77577558f25d ("cpuidle: teo: Rework most recent idle duration values treatment")
+Reported-by: Doug Smythies <dsmythies@telus.net>
+Tested-by: Doug Smythies <dsmythies@telus.net>
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+(cherry picked from commit ca80b9148e744f2c65c9b8add20e05330be37ff4)
+Signed-off-by: Panchajanya1999 <kernel@panchajanya.dev>
+(cherry picked from commit 9cb12be5dc6a3d3158fe1447933a091fc07d0393)
+(cherry picked from commit 618b622a3d40543a7a46529b498dea12c9569754)
+---
+ drivers/cpuidle/governors/teo.c | 40 ++++++++++++++++++++++-----------
+ 1 file changed, 27 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/cpuidle/governors/teo.c b/drivers/cpuidle/governors/teo.c
+index f7e48617504e..fb993d84b59e 100644
+--- a/drivers/cpuidle/governors/teo.c
++++ b/drivers/cpuidle/governors/teo.c
+@@ -393,32 +393,46 @@ static int teo_select(struct cpuidle_driver *drv, struct cpuidle_device *dev,
+ 		intercept_sum = 0;
+ 		recent_sum = 0;
+ 
+-		for (i = idx - 1; i >= idx0; i--) {
++		for (i = idx - 1; i >= 0; i--) {
+ 			struct teo_bin *bin = &cpu_data->state_bins[i];
+ 			s64 span_ns;
+ 
+ 			intercept_sum += bin->intercepts;
+ 			recent_sum += bin->recent;
+ 
++			span_ns = teo_middle_of_bin(i, drv);
++
++			if ((!alt_recent || 2 * recent_sum > idx_recent_sum) &&
++			    (!alt_intercepts ||
++			     2 * intercept_sum > idx_intercept_sum)) {
++				if (teo_time_ok(span_ns) &&
++				    !dev->states_usage[i].disable) {
++					idx = i;
++					duration_ns = span_ns;
++				} else {
++					/*
++					 * The current state is too shallow or
++					 * disabled, so take the first enabled
++					 * deeper state with suitable time span.
++					 */
++					idx = last_enabled_idx;
++					duration_ns = last_enabled_span_ns;
++				}
++				break;
++			}
++
+ 			if (dev->states_usage[i].disable)
+ 				continue;
+ 
+-			span_ns = teo_middle_of_bin(i, drv);
+ 			if (!teo_time_ok(span_ns)) {
+ 				/*
+-				 * The current state is too shallow, so select
+-				 * the first enabled deeper state.
++				 * The current state is too shallow, but if an
++				 * alternative candidate state has been found,
++				 * it may still turn out to be a better choice.
+ 				 */
+-				duration_ns = last_enabled_span_ns;
+-				idx = last_enabled_idx;
+-				break;
+-			}
++				if (last_enabled_idx != idx)
++					continue;
+ 
+-			if ((!alt_recent || 2 * recent_sum > idx_recent_sum) &&
+-			    (!alt_intercepts ||
+-			     2 * intercept_sum > idx_intercept_sum)) {
+-				idx = i;
+-				duration_ns = span_ns;
+ 				break;
+ 			}
+ 

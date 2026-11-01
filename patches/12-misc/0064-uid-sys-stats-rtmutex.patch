@@ -1,0 +1,121 @@
+From bc9fb8a9aadd56625e68909c4b46ad6fe96aa769 Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Sat, 12 Oct 2024 21:21:29 -0700
+Subject: [PATCH] uid_sys_stats: Convert uid_lock from a spin lock to rt_mutex
+
+In commit 97f2f8a065cb ("ANDROID: uid_sys_stat: split the global lock
+uid_lock to the fine-grained locks for each hlist in hash_table"), the lock
+was converted into a spin lock because it was acquired under an RCU read
+lock. Since that is no longer the case, convert uid_lock back to rt_mutex
+since it is held with preemption disabled for a very long time, creating
+system-wide stutters:
+  # tracer: preemptoff
+  #
+  # preemptoff latency trace v1.1.5 on 6.1.75-Sultan
+  # --------------------------------------------------------------------
+  # latency: 1624 us, #8492/8492, CPU#5 | (M:preempt VP:0, KP:0, SP:0 HP:0 #P:8)
+  #    -----------------
+  #    | task: batterystats-wo-1518 (uid:1000 nice:0 policy:0 rt_prio:0)
+  #    -----------------
+  #  => started at: uid_cputime_show
+  #  => ended at:   uid_cputime_show
+  #
+  #
+  #                    _------=> CPU#
+  #                   / _-----=> irqs-off/BH-disabled
+  #                  | / _----=> need-resched
+  #                  || / _---=> hardirq/softirq
+  #                  ||| / _--=> preempt-depth
+  #                  |||| / _-=> migrate-disable
+  #                  ||||| /     delay
+  #  cmd     pid     |||||| time  |   caller
+  #     \   /        ||||||  \    |    /
+     <...>-1518      5...1.    0us : _raw_spin_lock <-uid_cputime_show
+                                    ...
+     <...>-1518      5...1. 1625us : _raw_spin_unlock <-uid_cputime_show
+     <...>-1518      5...1. 1625us : tracer_preempt_on <-uid_cputime_show
+     <...>-1518      5...1. 1627us : <stack trace>
+   => _raw_spin_unlock
+   => uid_cputime_show
+   => seq_read_iter
+   => seq_read
+   => proc_reg_read
+   => vfs_read
+   => __arm64_sys_read
+   => invoke_syscall.constprop.0
+   => do_el0_svc
+   => el0_svc
+   => el0t_64_sync_handler
+   => el0t_64_sync
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ drivers/misc/uid_sys_stats.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/misc/uid_sys_stats.c b/drivers/misc/uid_sys_stats.c
+index b005d4d4d..5aff2b299 100644
+--- a/drivers/misc/uid_sys_stats.c
++++ b/drivers/misc/uid_sys_stats.c
+@@ -23,17 +23,17 @@
+ #include <linux/mm.h>
+ #include <linux/proc_fs.h>
+ #include <linux/profile.h>
++#include <linux/rtmutex.h>
+ #include <linux/sched/cputime.h>
+ #include <linux/seq_file.h>
+ #include <linux/slab.h>
+ #include <linux/uaccess.h>
+-#include <linux/spinlock_types.h>
+ 
+ #define UID_HASH_BITS	10
+ #define UID_HASH_NUMS	(1 << UID_HASH_BITS)
+ DECLARE_HASHTABLE(hash_table, UID_HASH_BITS);
+ /* uid_lock[bkt] ensure consistency of hash_table[bkt] */
+-spinlock_t uid_lock[UID_HASH_NUMS];
++static struct rt_mutex uid_lock[UID_HASH_NUMS];
+ 
+ #define for_each_bkt(bkt) \
+ 	for (bkt = 0; bkt < HASH_SIZE(hash_table); bkt++)
+@@ -88,7 +88,7 @@ static void init_hash_table_and_lock(void)
+ 
+ 	hash_init(hash_table);
+ 	for (i = 0; i < UID_HASH_NUMS; i++)
+-		spin_lock_init(&uid_lock[i]);
++		rt_mutex_init(&uid_lock[i]);
+ }
+ 
+ static inline int uid_to_bkt(uid_t uid)
+@@ -98,27 +98,27 @@ static inline int uid_to_bkt(uid_t uid)
+ 
+ static inline int trylock_uid(uid_t uid)
+ {
+-	return spin_trylock(&uid_lock[uid_to_bkt(uid)]);
++	return rt_mutex_trylock(&uid_lock[uid_to_bkt(uid)]);
+ }
+ 
+ static inline void lock_uid(uid_t uid)
+ {
+-	spin_lock(&uid_lock[uid_to_bkt(uid)]);
++	rt_mutex_lock(&uid_lock[uid_to_bkt(uid)]);
+ }
+ 
+ static inline void unlock_uid(uid_t uid)
+ {
+-	spin_unlock(&uid_lock[uid_to_bkt(uid)]);
++	rt_mutex_unlock(&uid_lock[uid_to_bkt(uid)]);
+ }
+ 
+ static inline void lock_uid_by_bkt(u32 bkt)
+ {
+-	spin_lock(&uid_lock[bkt]);
++	rt_mutex_lock(&uid_lock[bkt]);
+ }
+ 
+ static inline void unlock_uid_by_bkt(u32 bkt)
+ {
+-	spin_unlock(&uid_lock[bkt]);
++	rt_mutex_unlock(&uid_lock[bkt]);
+ }
+ 
+ static u64 compute_write_bytes(struct task_io_accounting *ioac)

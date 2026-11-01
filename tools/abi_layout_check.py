@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""检查关键结构体的大小和偏移是否与 5.10.272 GKI 原厂布局一致。
+"""Check key struct offsets/sizes against the stock 5.10.272 GKI layout.
 
-期望值来自 AOSP GKI 5.10.272 基线（out-final）。cfs_rq 保留原厂
-android_vendor_data1 的偏移 344，CFS 带宽指针放在尾部填充的 472，因此不需要
-布局例外；ipc_ids 和 netns_ipv4 也必须保持原厂布局。
+Expected values are from the AOSP GKI 5.10.272 baseline (out-final).
+cfs_rq keeps the stock vendor data array at 344; the CFS bandwidth
+pointer lives in the tail padding at 472, so there is no layout
+exception. ipc_ids and netns_ipv4 must also keep the stock layout.
 """
 import re
 import subprocess

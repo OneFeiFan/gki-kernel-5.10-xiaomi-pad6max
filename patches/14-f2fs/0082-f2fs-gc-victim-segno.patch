@@ -1,0 +1,54 @@
+From 12c8d659bf2feed747c7f871d733d1cf7a25e982 Mon Sep 17 00:00:00 2001
+From: Yongpeng Yang <yangyongpeng1@oppo.com>
+Date: Wed, 4 Dec 2024 11:31:13 +0800
+Subject: [PATCH 82/89] f2fs: The GC triggered by ioctl also needs to mark the
+ segno as victim
+
+In SSR mode, the segment selected for allocation might be the same as
+the target segment of the GC triggered by ioctl, resulting in the GC
+moving the CURSEG_I(sbi, type)->segno.
+Thread A				Thread B or Thread A
+- f2fs_ioc_gc_range
+ - __f2fs_ioc_gc_range(.victim_segno=segno#N)
+  - f2fs_gc
+   - __get_victim
+    - f2fs_get_victim
+    : segno#N is valid, return segno#N as source segment of GC
+					- f2fs_allocate_data_block
+						- need_new_seg
+						- get_ssr_segment
+						- f2fs_get_victim
+						: get segno #N as destination segment
+						- change_curseg
+
+Fixes: e066b83c9b40 ("f2fs: add ioctl to flush data from faster device to cold area")
+Signed-off-by: Yongpeng Yang <yangyongpeng1@oppo.com>
+Reviewed-by: Chao Yu <chao@kernel.org>
+Signed-off-by: Jaegeuk Kim <jaegeuk@kernel.org>
+---
+ fs/f2fs/gc.c | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/fs/f2fs/gc.c b/fs/f2fs/gc.c
+index 66b262db0..2ca267e36 100644
+--- a/fs/f2fs/gc.c
++++ b/fs/f2fs/gc.c
+@@ -725,11 +725,14 @@ static int get_victim_by_default(struct f2fs_sb_info *sbi,
+ 			goto out;
+ 		}
+ 
+-		if (sec_usage_check(sbi, GET_SEC_FROM_SEG(sbi, *result)))
++		if (sec_usage_check(sbi, GET_SEC_FROM_SEG(sbi, *result))) {
+ 			ret = -EBUSY;
+-		else
+-			p.min_segno = *result;
+-		goto out;
++			goto out;
++		}
++		if (gc_type == FG_GC)
++			clear_bit(GET_SEC_FROM_SEG(sbi, *result), dirty_i->victim_secmap);
++		p.min_segno = *result;
++		goto got_result;
+ 	}
+ 
+ 	ret = -ENODATA;

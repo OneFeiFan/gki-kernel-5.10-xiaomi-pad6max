@@ -2687,6 +2687,34 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 
 	get_scan_count(lruvec, sc, nr);
 
+	/*
+	 * le9uo's hard watermarks can zero every scan target when all
+	 * evictable LRUs are below their floors. Without a fallback the
+	 * scan makes no progress, priority drops, and the node can only
+	 * exit through OOM. Refill only when every target is zero so the
+	 * normal SCAN_ANON/SCAN_FILE steering is preserved.
+	 */
+	{
+		bool all_zero = true;
+
+		for_each_evictable_lru(lru) {
+			if (nr[lru]) {
+				all_zero = false;
+				break;
+			}
+		}
+		if (all_zero) {
+			for_each_evictable_lru(lru) {
+				unsigned long size;
+
+				size = lruvec_lru_size(lruvec, lru,
+						       sc->reclaim_idx);
+				if (size)
+					nr[lru] = size / (1UL << sc->priority);
+			}
+		}
+	}
+
 	/* Record the original scan target for proportional adjustments later */
 	memcpy(targets, nr, sizeof(nr));
 

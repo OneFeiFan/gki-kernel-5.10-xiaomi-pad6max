@@ -1,0 +1,85 @@
+From cdb72c3a997f2d07e3834f1137b3542580b8ed39 Mon Sep 17 00:00:00 2001
+From: Park Ju Hyung <qkrwngud825@gmail.com>
+Date: Fri, 12 Jul 2019 01:15:15 +0900
+Subject: [PATCH 3/9] dma_buf: use kmem_cache pool for struct
+ dma_buf_attachment
+
+These get allocated and freed millions of times on this kernel tree.
+
+Use a dedicated kmem_cache pool and avoid costly dynamic memory allocations.
+
+Signed-off-by: Park Ju Hyung <qkrwngud825@gmail.com>
+Signed-off-by: hazepynut <naden.hey@gmail.com>
+Signed-off-by: bachnxuan <bachnxuan@gmail.com>
+---
+ drivers/dma-buf/dma-buf.c | 15 +++++++++++----
+ init/main.c               |  2 ++
+ 2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/dma-buf/dma-buf.c b/drivers/dma-buf/dma-buf.c
+index da4f934f9..161ebef37 100644
+--- a/drivers/dma-buf/dma-buf.c
++++ b/drivers/dma-buf/dma-buf.c
+@@ -31,6 +31,13 @@
+ 
+ #include "dma-buf-sysfs-stats.h"
+ 
++static struct kmem_cache *kmem_attach_pool;
++
++void __init init_dma_buf_kmem_pool(void)
++{
++	kmem_attach_pool = KMEM_CACHE(dma_buf_attachment, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
++}
++
+ struct dma_buf_list {
+ 	struct list_head head;
+ 	struct mutex lock;
+@@ -761,8 +768,8 @@ dma_buf_dynamic_attach(struct dma_buf *dmabuf, struct device *dev,
+ 	if (WARN_ON(importer_ops && !importer_ops->move_notify))
+ 		return ERR_PTR(-EINVAL);
+ 
+-	attach = kzalloc(sizeof(*attach), GFP_KERNEL);
+-	if (!attach)
++	attach = kmem_cache_zalloc(kmem_attach_pool, GFP_KERNEL);
++	if (attach == NULL)
+ 		return ERR_PTR(-ENOMEM);
+ 
+ 	attach->dev = dev;
+@@ -812,7 +819,7 @@ dma_buf_dynamic_attach(struct dma_buf *dmabuf, struct device *dev,
+ 	return attach;
+ 
+ err_attach:
+-	kfree(attach);
++	kmem_cache_free(kmem_attach_pool, attach);
+ 	return ERR_PTR(ret);
+ 
+ err_unpin:
+@@ -874,7 +881,7 @@ void dma_buf_detach(struct dma_buf *dmabuf, struct dma_buf_attachment *attach)
+ 	if (dmabuf->ops->detach)
+ 		dmabuf->ops->detach(dmabuf, attach);
+ 
+-	kfree(attach);
++	kmem_cache_free(kmem_attach_pool, attach);
+ }
+ EXPORT_SYMBOL_GPL(dma_buf_detach);
+ 
+diff --git a/init/main.c b/init/main.c
+index 98d090973..5635a62fe 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -814,6 +814,7 @@ void __init __weak arch_call_rest_init(void)
+ 	rest_init();
+ }
+ 
++void __init init_dma_buf_kmem_pool(void);
+ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
+ {
+ 	char *command_line;
+@@ -1006,6 +1007,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
+ 	cgroup_init();
+ 	taskstats_init_early();
+ 	delayacct_init();
++	init_dma_buf_kmem_pool();
+ 
+ 	acpi_subsystem_init();
+ 	arch_post_acpi_subsys_init();

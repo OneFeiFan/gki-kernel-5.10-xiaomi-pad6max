@@ -1,0 +1,62 @@
+From 1c005fbda99dc161a7a5e49c9bf02ded72056807 Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Sat, 6 Feb 2021 19:51:14 -0800
+Subject: [PATCH] selinux: Avoid dynamic memory allocation for INITCONTEXTLEN
+ buffers
+
+The default INITCONTEXTLEN-sized buffers can fit on the stack. Do so to
+save a call to kmalloc() in a hot path.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ security/selinux/hooks.c | 15 ++++++---------
+ 1 file changed, 6 insertions(+), 9 deletions(-)
+
+diff --git a/security/selinux/hooks.c b/security/selinux/hooks.c
+index d2566870e..28a779924 100644
+--- a/security/selinux/hooks.c
++++ b/security/selinux/hooks.c
+@@ -1338,21 +1338,16 @@ static int inode_doinit_use_xattr(struct inode *inode, struct dentry *dentry,
+ 				  u32 def_sid, u32 *sid)
+ {
+ #define INITCONTEXTLEN 255
+-	char *context;
++	char context_onstack[INITCONTEXTLEN + 1] __aligned(sizeof(long));
++	char *context = context_onstack;
+ 	unsigned int len;
+ 	int rc;
+ 
+ 	len = INITCONTEXTLEN;
+-	context = kmalloc(len + 1, GFP_NOFS);
+-	if (!context)
+-		return -ENOMEM;
+-
+ 	context[len] = '\0';
+ 	rc = __vfs_getxattr(dentry, inode, XATTR_NAME_SELINUX, context, len,
+ 			    XATTR_NOSECURITY);
+ 	if (rc == -ERANGE) {
+-		kfree(context);
+-
+ 		/* Need a larger buffer.  Query for the right size. */
+ 		rc = __vfs_getxattr(dentry, inode, XATTR_NAME_SELINUX, NULL, 0,
+ 				    XATTR_NOSECURITY);
+@@ -1369,7 +1364,8 @@ static int inode_doinit_use_xattr(struct inode *inode, struct dentry *dentry,
+ 				    context, len, XATTR_NOSECURITY);
+ 	}
+ 	if (rc < 0) {
+-		kfree(context);
++		if (context != context_onstack)
++			kfree(context);
+ 		if (rc != -ENODATA) {
+ 			pr_warn("SELinux: %s:  getxattr returned %d for dev=%s ino=%ld\n",
+ 				__func__, -rc, inode->i_sb->s_id, inode->i_ino);
+@@ -1393,7 +1389,8 @@ static int inode_doinit_use_xattr(struct inode *inode, struct dentry *dentry,
+ 				__func__, context, -rc, dev, ino);
+ 		}
+ 	}
+-	kfree(context);
++	if (context != context_onstack)
++		kfree(context);
+ 	return 0;
+ }
+ 

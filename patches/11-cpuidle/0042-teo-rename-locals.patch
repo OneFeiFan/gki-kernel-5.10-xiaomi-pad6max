@@ -1,0 +1,63 @@
+From 5e566cb4020aac35531083fb12371fef028a889e Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Fri, 30 Jul 2021 16:38:52 +0200
+Subject: [PATCH] cpuidle: teo: Rename two local variables in teo_select()
+
+Rename two local variables in teo_select() so that their names better
+reflect their purpose.
+
+No functional impact.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+(cherry picked from commit 2ffea51538c75095527e0a082d83c32edeb71a75)
+Signed-off-by: Panchajanya1999 <kernel@panchajanya.dev>
+(cherry picked from commit 52d4b9b0ebbd6c6f60daa830ebba154856270450)
+(cherry picked from commit 930621332fbb5fef217de0fd66776223ba1ac866)
+---
+ drivers/cpuidle/governors/teo.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/cpuidle/governors/teo.c b/drivers/cpuidle/governors/teo.c
+index fb993d84b59e..6c060c10a13c 100644
+--- a/drivers/cpuidle/governors/teo.c
++++ b/drivers/cpuidle/governors/teo.c
+@@ -378,8 +378,8 @@ static int teo_select(struct cpuidle_driver *drv, struct cpuidle_device *dev,
+ 	alt_intercepts = 2 * idx_intercept_sum > cpu_data->total - idx_hit_sum;
+ 	alt_recent = idx_recent_sum > NR_RECENT / 2;
+ 	if (alt_recent || alt_intercepts) {
+-		s64 last_enabled_span_ns = duration_ns;
+-		int last_enabled_idx = idx;
++		s64 first_suitable_span_ns = duration_ns;
++		int first_suitable_idx = idx;
+ 
+ 		/*
+ 		 * Look for the deepest idle state whose target residency had
+@@ -415,8 +415,8 @@ static int teo_select(struct cpuidle_driver *drv, struct cpuidle_device *dev,
+ 					 * disabled, so take the first enabled
+ 					 * deeper state with suitable time span.
+ 					 */
+-					idx = last_enabled_idx;
+-					duration_ns = last_enabled_span_ns;
++					idx = first_suitable_idx;
++					duration_ns = first_suitable_span_ns;
+ 				}
+ 				break;
+ 			}
+@@ -430,14 +430,14 @@ static int teo_select(struct cpuidle_driver *drv, struct cpuidle_device *dev,
+ 				 * alternative candidate state has been found,
+ 				 * it may still turn out to be a better choice.
+ 				 */
+-				if (last_enabled_idx != idx)
++				if (first_suitable_idx != idx)
+ 					continue;
+ 
+ 				break;
+ 			}
+ 
+-			last_enabled_span_ns = span_ns;
+-			last_enabled_idx = i;
++			first_suitable_span_ns = span_ns;
++			first_suitable_idx = i;
+ 		}
+ 	}
+ 

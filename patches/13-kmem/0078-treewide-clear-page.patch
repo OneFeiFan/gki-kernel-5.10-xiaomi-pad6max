@@ -1,0 +1,111 @@
+From 2ce148753cbf62d4e7ffd3beefdc4b2836c4b2cf Mon Sep 17 00:00:00 2001
+From: ztc1997 <dev@ztc1997.com>
+Date: Mon, 13 May 2024 11:58:33 +0800
+Subject: [PATCH 8/9] treewide: Optimize page clearing by replacing memset with
+ clear_page
+
+---
+ arch/arm64/mm/mmu.c                              | 2 +-
+ drivers/staging/android/ion/heaps/ion_cma_heap.c | 2 +-
+ fs/ext4/super.c                                  | 2 +-
+ fs/f2fs/segment.c                                | 6 +++---
+ fs/f2fs/segment.h                                | 2 +-
+ kernel/trace/tracing_map.c                       | 2 +-
+ 6 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm64/mm/mmu.c b/arch/arm64/mm/mmu.c
+index 0199c7d6f..d1205fc17 100644
+--- a/arch/arm64/mm/mmu.c
++++ b/arch/arm64/mm/mmu.c
+@@ -106,7 +106,7 @@ static phys_addr_t __init early_pgtable_alloc(int shift)
+ 	 */
+ 	ptr = pte_set_fixmap(phys);
+ 
+-	memset(ptr, 0, PAGE_SIZE);
++	clear_page(ptr);
+ 
+ 	/*
+ 	 * Implicit barriers also ensure the zeroed page is visible to the page
+diff --git a/drivers/staging/android/ion/heaps/ion_cma_heap.c b/drivers/staging/android/ion/heaps/ion_cma_heap.c
+index 6ba7fd84c..e3e795b07 100644
+--- a/drivers/staging/android/ion/heaps/ion_cma_heap.c
++++ b/drivers/staging/android/ion/heaps/ion_cma_heap.c
+@@ -49,7 +49,7 @@ static int ion_cma_allocate(struct ion_heap *heap, struct ion_buffer *buffer,
+ 		while (nr_clear_pages > 0) {
+ 			void *vaddr = kmap_atomic(page);
+ 
+-			memset(vaddr, 0, PAGE_SIZE);
++			clear_page(vaddr);
+ 			kunmap_atomic(vaddr);
+ 			page++;
+ 			nr_clear_pages--;
+diff --git a/fs/ext4/super.c b/fs/ext4/super.c
+index b13130af2..8a5f418b0 100644
+--- a/fs/ext4/super.c
++++ b/fs/ext4/super.c
+@@ -3958,7 +3958,7 @@ int ext4_calculate_overhead(struct super_block *sb)
+ 		blks = count_overhead(sb, i, buf);
+ 		overhead += blks;
+ 		if (blks)
+-			memset(buf, 0, PAGE_SIZE);
++			clear_page(buf);
+ 		cond_resched();
+ 	}
+ 
+diff --git a/fs/f2fs/segment.c b/fs/f2fs/segment.c
+index d606ebd3a..227d50ac7 100644
+--- a/fs/f2fs/segment.c
++++ b/fs/f2fs/segment.c
+@@ -2452,7 +2452,7 @@ static void write_current_sum_page(struct f2fs_sb_info *sbi,
+ 	struct f2fs_summary_block *dst;
+ 
+ 	dst = (struct f2fs_summary_block *)page_address(page);
+-	memset(dst, 0, PAGE_SIZE);
++	clear_page(dst);
+ 
+ 	mutex_lock(&curseg->curseg_mutex);
+ 
+@@ -3990,7 +3990,7 @@ static void write_compacted_summaries(struct f2fs_sb_info *sbi, block_t blkaddr)
+ 
+ 	page = f2fs_grab_meta_page(sbi, blkaddr++);
+ 	kaddr = (unsigned char *)page_address(page);
+-	memset(kaddr, 0, PAGE_SIZE);
++	clear_page(kaddr);
+ 
+ 	/* Step 1: write nat cache */
+ 	seg_i = CURSEG_I(sbi, CURSEG_HOT_DATA);
+@@ -4016,7 +4016,7 @@ static void write_compacted_summaries(struct f2fs_sb_info *sbi, block_t blkaddr)
+ 			if (!page) {
+ 				page = f2fs_grab_meta_page(sbi, blkaddr++);
+ 				kaddr = (unsigned char *)page_address(page);
+-				memset(kaddr, 0, PAGE_SIZE);
++				clear_page(kaddr);
+ 				written_size = 0;
+ 			}
+ 			summary = (struct f2fs_summary *)(kaddr + written_size);
+diff --git a/fs/f2fs/segment.h b/fs/f2fs/segment.h
+index c3618fafe..10a42e532 100644
+--- a/fs/f2fs/segment.h
++++ b/fs/f2fs/segment.h
+@@ -416,7 +416,7 @@ static inline void seg_info_to_sit_page(struct f2fs_sb_info *sbi,
+ 	int i;
+ 
+ 	raw_sit = (struct f2fs_sit_block *)page_address(page);
+-	memset(raw_sit, 0, PAGE_SIZE);
++	clear_page(raw_sit);
+ 	for (i = 0; i < end - start; i++) {
+ 		rs = &raw_sit->entries[i];
+ 		se = get_seg_entry(sbi, start + i);
+diff --git a/kernel/trace/tracing_map.c b/kernel/trace/tracing_map.c
+index d90028052..38a158873 100644
+--- a/kernel/trace/tracing_map.c
++++ b/kernel/trace/tracing_map.c
+@@ -292,7 +292,7 @@ static void tracing_map_array_clear(struct tracing_map_array *a)
+ 		return;
+ 
+ 	for (i = 0; i < a->n_pages; i++)
+-		memset(a->pages[i], 0, PAGE_SIZE);
++		clear_page(a->pages[i]);
+ }
+ 
+ static void tracing_map_array_free(struct tracing_map_array *a)

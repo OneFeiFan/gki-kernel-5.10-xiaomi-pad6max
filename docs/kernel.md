@@ -7,9 +7,9 @@
 缓存键里，`/proc/config.gz` 可能还是上一次的配置数据，看起来像配置没生效。
 
 当前基线是 ACK `android12-5.10-lts` 的 `8059ae2`（2026-10-24，Linux 5.10.272）；
-通用 26 个 + 小米 3 个，共 29 个补丁应用后的源码树是 `2afd8cc8`（通用 26 个的树是
-`862d9162`）。`8059ae2` 相对旧基线 `a1eed2e9c` 的净差异只有 `net/can/bcm.c` 的一处
-回退；ACK 10 月的 ASB 修复旧基线里已经通过其他提交合入。
+`series` 99 个通用补丁的树是 `8f65209b...`，`series.xiaomi` 103 个（通用 99 + 小米 4）
+的树是 `7f30604d...`。`8059ae2` 相对旧基线 `a1eed2e9c` 的净差异
+只有 `net/can/bcm.c` 的一处回退；ACK 10 月的 ASB 修复旧基线里已经通过其他提交合入。
 
 ## 门禁
 
@@ -28,11 +28,11 @@ python3 tools/abi_layout_check.py "$OUT/dist/vmlinux"
 从设备的 `vendor_boot` 和 `vendor_dlkm` 取，不随仓库发布；布局检查需要
 `pahole`。
 
-2026-10-31（r6，`out-xiaomi`，29 补丁）实测结果，与 r5 相同：
+2026-11-01（r16，`out-xiaomi`）实测结果：
 
-- 7298 个导出符号，缺失 0，CRC 差异 0
-- vendor_boot 355 个模块、vendor_dlkm 315 个模块，失败 0
-- 45 项 CONFIG 满足
+- 7298 个导出符号，缺失 0，CRC 差异 0；新增 RCU 导出被 `CONFIG_TRIM_UNUSED_KSYMS` 裁掉，extra 0
+- vendor_boot 355 个模块、vendor_dlkm 315 个模块，失败 0（合计 670）
+- 47 项 CONFIG 满足
 - `cfs_rq` 大小 512，`android_vendor_data1` 偏移 344，`cfs_bandwidth` 指针偏移 472
 
 ## 镜像
@@ -84,8 +84,8 @@ boot patch level 由 TEE 维护（2026-02-01），与这个头字段无关；保
 ## 行为测试
 
 设备上（root）的测试二进制和整机检查脚本是维护者的本机工具，不随仓库发布。
-NTSync/futex/epoll/CFS 的记录来自 2026-10-30 的 r4；2026-10-31 的 r6 做了开机、
-门禁和 ExtM/mfz 节点检查，没有重跑这些 selftests。
+NTSync/futex/epoll/CFS 的记录来自 2026-10-30 的 r4；2026-11-01 的 r16 做了开机、
+KMI 门禁、RCU 开关/churn 和 zram/BBR 节点检查，没有重跑这些 selftests。
 
 ```sh
 sh /data/local/tmp/verify_yudi_kernel.sh
@@ -132,39 +132,12 @@ per-node 的 kcompressd 线程，压缩和写回不再占用回收线程。
   `pswpout` 增加约 238 万页，kcompressd CPU 90→449 ticks、kswapd 149→580，
   无 OOM/panic
 
-## ExtM 与内存冻结（mfz）
-
-0027 把 zram 换成小米 ExtM 写回实现，0028 加 mfz 策略，0029 修复 0027 从小米源码带入的 memcg 文件
-注册位置。r6（29 补丁）实机结果：
-
-- zram 内建，`comp_algorithm` 为 `[lz4kd]`，`backing_dev` 为 `/dev/block/dm-48`
-- `/sys/block/zram0` 出现 `mfz_enable`、`mfz_disk_quota`、`mfz_compr_data_size`、
-  `mfz_idle_stat`、`bd_stat`；`freeze-app/memory.anno_writeback_enable=2`（init.rc
-  写 1，驱动按 5.10 接口存 2）
-- 测试进程放进 `freeze-app` 内存组，`MADV_PAGEOUT` 换出 512MB 后
-  `mfz_compr_data_size` 为 2,871,990 字节；进程退出后回到约 0
-- `mfz_enable=0`、`mfz_disk_quota=524288`，默认由 ROM 的 PerfInit 决定是否启用
-
-冻结器现状（2026-10-31 实测）：内核的 v1 freezer 和 v2 冻结都可用。进程都在 cgroup v2
-的分组里（system_server 在 `/system/uid_1000/pid_*`，应用在 `/apps/uid_*/pid_*`）；v2 只
-列出 pids 控制器是正常的（cpu、cpuset、memory、blkio 挂在 v1，其余是 v1 专用控制器），
-v2 冻结是内核核心功能，不需要控制器。新建组写 `cgroup.freeze` 实测 `cgroup.events` 显示
-`frozen 1`，解冻后 `frozen 0`。系统 API 冻结器的 `Freezer disabled` 来自 ROM 默认设置：
-`cached_apps_freezer` 为 `disabled`（`dumpsys settings`：`pkg:android value:disabled
-default:disabled defaultSystemSet:true`），`use_freezer` 设备配置为空，日志里没有
-`Checking cgroup freezer`，系统没有走到检测内核能力那一步；澎湃 OS 用自己的 Millet
-冻结链路。v1 freezer ROM 不挂载，第三方墓碑在自己的挂载命名空间里挂（如
-`/sys/fs/cgroup/freezer/perf/frozen`）。第三方冻结（v1 或 v2）不会把进程搬进
-`/dev/memcg/freeze-app`，所以 mfz 只在小米自己的冻结链路下生效。Millet 的
-`persist.sys.millet.cgroup=true` 会 tmpfs 覆盖 `/sys/fs/cgroup`，与 Android 16 的分组
-布局冲突，运行中开启会导致系统服务崩溃，不要直接开。
-
 ## cpuidle governor（TEO）
 
 ACK 的 5.10 基线已经带 TEO（`CONFIG_CPU_IDLE_GOV_TEO=y`），设备上
 `available_governors` 是 `menu teo qcom-cpu-lpm`，默认走厂商的 `qcom-cpu-lpm`。
 
-yudi-tweaks 1.6 增加 `GOV` 开关（跟随系统 / teo / qcom-cpu-lpm）：WebUI 保存时
+yudi-tweaks 2.2 增加 `GOV` 开关（跟随系统 / teo / qcom-cpu-lpm）：WebUI 保存时
 立即写 `current_governor`，重启后由 `service.sh` 再应用；选「跟随系统」时模块
 不写 governor。
 
@@ -177,27 +150,51 @@ yudi-tweaks 1.6 增加 `GOV` 开关（跟随系统 / teo / qcom-cpu-lpm）：Web
 
 TEO 的深睡占比略高，没有异常；功耗和唤醒延迟没有测，默认仍保持厂商 governor。
 
+2026-11-01 又做了 PELT multiplier 的 16 分钟亮屏 ABBA（1 vs 2）：冷启动差异
+-1.2%/-1.4%/0.0%，p=0.40/0.55/1.00，UI 帧和 CPU 频率驻留一致；结论保持默认 `1`，
+不把 `2` 写进 yudi-tweaks。8 小时待机那一轮因为 USB/adb 的 `ssusb` wakelock
+没有进入 suspend，数据作废，需要拔掉 USB/充电线重跑。
+
+## RCU 惰性回调（r14）
+
+r14 加入 ACK android14-5.15 路线的 RCU 惰性回调（`16-rcu/0091-0102`，12 个补丁）：
+旧 5.10 惰性核心 + 开机/挂起 `rcu_async_hurry_nesting` + 可写运行时开关
+`/sys/module/rcutree/parameters/enable_rcu_lazy`（默认 `N`，0644）+ 收缩器修正 +
+`call_rcu_hurry` 调用点。配置 `CONFIG_RCU_LAZY=y`、`CONFIG_RCU_LAZY_DEFAULT_OFF=y`；
+本机 `rcu_nocbs=0-7`。KMI 数字见上；开关写 1/0 正常，5000 文件 churn 无 RCU stall。
+全量审计后又补了 `drivers/scsi/scsi_error.c` 的 `call_rcu_hurry()`（r16），
+避免 SCSI/UFS 错误恢复被惰性拖慢；IPOIB/AF_RXRPC 的条件风险当前配置未构建。
+
+## SSG（可选，不默认）
+
+SSG 来自三星 SM-S908B 源码（ztc1997 移植），独立分支 `ssg-r14`、提交
+`ba45f1858`，补丁在 `refs-ssg-2026-11-01/0103-ssg-iosched.patch`。`elevator.c`
+改默认的 hunk 已丢弃，sda 默认仍是 cpq；构建/KMI 门禁全过。短测没有一致收益，
+顺序写反而低约 18%，所以不设默认、不并入默认 series。
+
 ## 灰度与探针
 
-- `CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y`（0023）：默认启用 power-efficient
+- `CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y`（0024）：默认启用 power-efficient
   unbound workqueues。已确认 `/sys/module/workqueue/parameters/power_efficient=Y`；
   真实功耗 A/B 还没做，去掉补丁即可回退。
-- zram 写回（0017）、小米 ExtM（0027）和 mfz（0028/0029）已经落地，不再是探针；
-  ExtM 的启用门槛在 PerfInit，见 [ExtM-research.md](ExtM-research.md)。
+- `CONFIG_ZRAM_WRITEBACK=y`（0017）：上游写回；小米 PerfInit 用它挂 ExtM 写回设备，ExtM 写回逻辑由 `xiaomi/0027` 提供。
+  `backing_dev`、`writeback*`、`bd_stat` 等节点；ExtM 是否真正启动取决于
+  PerfInit 的启动门槛，见 [ExtM-research.md](ExtM-research.md)。
 
 ## 已知限制
 
 - `tcp_plb_enabled=0`：PLB 面向数据中心 IPv6 多路径，手机网络没有收益。
 - `net_cls` 已启用但未配置：没有默认 classid，需要按容器分流时再写 tc/nft 规则。
-- 懒惰 RCU：5.10 没有这个特性；ztc 的回移也受 `rcu_expedited=1` 限制
-  （该参数来自 vendor_boot，不在我们改的 boot.img 里），暂不做。
+- RCU 惰性回调：已加入 r14，但默认关闭；需要时写 `enable_rcu_lazy=1`。旧 ztc 回移
+  受 `rcu_expedited=1` 限制，未采用。
 - `FHANDLE` 已启用：容器里可跑 systemd，但不要给容器 `CAP_DAC_READ_SEARCH`。
-- 内核默认保持 stock：`cubic`、BFQ/cpq、zram `lz4`、KSM 关闭、ADIOS 不作为默认。
+- 内核默认保持 stock：`cubic`、BFQ/cpq、zram 内建（Kconfig 默认 `lz4`，实际算法由系统或 yudi-tweaks 设置）、KSM 关闭、ADIOS 不作为默认。
   这些由 `yudi-tweaks` 模块在开机后调整。
-- 冻结器：内核 v1 freezer 与 v2 冻结都可用（v2 实测 `frozen 1/0`）；系统 API 冻结器被 ROM 默认设置
-  `cached_apps_freezer=disabled` 关闭（澎湃 OS 用 Millet）；第三方冻结不会把进程搬进 `freeze-app`，
-  mfz 只在小米自己的冻结链路下生效。
 - 没有开启 `CONFIG_DEBUG_INFO_BTF`，CO-RE eBPF 程序不能用。
+- 启动时有一条 vendor `nanosic_driver` 的 RCU 警告：它在 atomic power-supply
+  notifier 里调用会休眠的 `mutex_lock()`；`atomic_notifier_call_chain()` 持有 RCU
+  read lock，触发 `tree_plugin.h:297` 的 `WARN_ON_ONCE`。这是 vendor 模块的问题，
+  不是 r16 引入，功能正常。
 - 基线是 ACK `8059ae2`（Linux 5.10.272）；ACK 还没合入 Linux stable 5.10.273，
   安全缺口见 [ecosystem-survey.md](ecosystem-survey.md)。ACK 10 月的 ASB 修复
   旧基线里已经通过其他提交合入，升到 8059ae2 没有新增安全修复。

@@ -11,32 +11,36 @@ Wine/Proton。
   IPv6 NAT、IPVS、SCTP、VXLAN/VLAN/IPVLAN/MACVLAN、L2TP/FOU/GRE、tc、
   blkio 限速、Btrfs、checkpoint/restore、CRIU diag、FHANDLE
 - Wine：NTSync、futex_waitv（64/32 位）、epoll_pwait2
-- 存储与调度：zram 的 LZ4K/LZ4KD、小米 ExtM 写回、内存冻结（mfz）、BBRv3、ADIOS、le9uo、CFS 带宽（kABI 拆分）
+- 存储与调度：内建 zram 与 LZ4K/LZ4KD、小米 ExtM 与内存冻结（`xiaomi/` 组）、BBRv3、ADIOS、le9uo、CFS 带宽（kABI 拆分）
 
 内核只负责能力和 stock 默认值。BBRv3、zram 算法、KSM、ADIOS、DAMON 这些运行时
 开关由 KernelSU 模块负责。
 
-`WQ_POWER_EFFICIENT_DEFAULT` 仍是灰度项。zram 已换成小米 ExtM 写回实现，并接上
-内存冻结（mfz）策略；`mfz_enable` 默认 0，由 ROM 的 PerfInit 决定是否启用。见
-[docs/kernel.md](docs/kernel.md) 与 [docs/ExtM-research.md](docs/ExtM-research.md)。
+当前还带一个灰度项：`WQ_POWER_EFFICIENT_DEFAULT`。zram 内建并由本仓库维护，小米 ExtM 来自
+小米官方开源源码（`patches/xiaomi/`），与第三方月亮内核完全切割，见 [docs/kernel.md](docs/kernel.md) 与
+[docs/ExtM-research.md](docs/ExtM-research.md)。
 
-cpuidle governor 默认跟随系统（`qcom-cpu-lpm`）；`yudi-tweaks` 1.8 提供 TEO 的
-运行时开关、zram 配置和月亮内存模块屏蔽。
+cpuidle governor 默认跟随系统（`qcom-cpu-lpm`）；`yudi-tweaks` 2.2 提供 TEO、
+RCU 惰性回调等运行时开关。RCU 惰性回调默认关闭，路径是
+`/sys/module/rcutree/parameters/enable_rcu_lazy`；PELT multiplier 实测无显著
+收益，保持默认 `1`；SSG 只保留可选补丁，默认仍是 cpq。
 
 ## 生态调研
 
 2026-10-30 对 10 个方向做了只读盘点，结论和差距见
 [docs/ecosystem-survey.md](docs/ecosystem-survey.md)。只归档，没有据此改内核。
 
-2026-10-31 基线已升到 ACK lts 最新 `8059ae2`；Linux stable 5.10.273 尚未合入
-ACK。通用补丁 26 个，小米组 3 个，共 29 个；29 个补丁后的源码树是 `2afd8cc8`。
+2026-10-31 基线已升到 ACK lts 最新 `8059ae2`。此后 r6–r14 陆续加入正确性修复、
+f2fs 修正、binder 位图查找和 RCU 惰性回调；当前共 103 个补丁（通用 99 + 小米 4），
+r16 树是 `7f30604d...`。r16 在 r14 基础上加了 SCSI EH 的 `call_rcu_hurry()` 修正；
+r15 是可选的 SSG 临时测试镜像，SSG 不设默认，默认仍是 cpq。
 
 ## 仓库结构
 
 | 目录 | 内容 |
 | --- | --- |
 | `source/` | 内核源码，构建环境里的 `common/` |
-| `patches/` | 相对 5.10.272 的 29 个功能补丁（通用 26 + 小米 3） |
+| `patches/` | 相对 5.10.272 的 103 个功能补丁 |
 | `tools/` | 验证脚本：符号、CRC、配置、结构布局 |
 | `docs/` | 构建与验证、设备状态、模块说明、GPU/ExtM 研究、生态调研 |
 
@@ -65,17 +69,21 @@ bash build/build.sh -j12
 
 ## 刷机
 
-镜像有两个版本，内核相同，ramdisk 不同。最后一次发布的是 r3（2026-10-30）；r4、
-r5 和 r6 只在本地构建，没有上传。r6 的 SHA256 见 [docs/HANDOFF-system-state.md](docs/HANDOFF-system-state.md)。
+每个内核有两个版本（KernelSU / 无 root），内核相同，ramdisk 不同。最后发布的是 r3（2026-10-30）；r4–r16 只在本地构建。
+当前稳定镜像是 r16（r14 + SCSI fix），r14/r15 保留作回退和 SSG 试验（SSG 默认不启用，sda 仍是 cpq）。
 
 | 镜像 | 内容 |
 | --- | --- |
-| `yudi-5.10.272-20261030-r3-ksu.img` | KernelSU |
-| `yudi-5.10.272-20261030-r3-noroot.img` | 无 root |
+| `~/kernel-sources/work/r14-images/yudi-5.10.272-20261101-r14-rcu-ksu.img` | r14 稳定，KernelSU |
+| `~/kernel-sources/work/r14-images/yudi-5.10.272-20261101-r14-rcu-noroot.img` | r14 稳定，无 root |
+| `~/kernel-sources/work/r15-ssg-images/yudi-5.10.272-20261101-r15-ssg-ksu.img` | r15 SSG 可选试验，KernelSU |
+| `~/kernel-sources/work/r15-ssg-images/yudi-5.10.272-20261101-r15-ssg-noroot.img` | r15 SSG 可选试验，无 root |
+| `~/kernel-sources/work/r16-scsi-images/yudi-5.10.272-20261101-r16-scsi-ksu.img` | r16 SCSI fix，KernelSU |
+| `~/kernel-sources/work/r16-scsi-images/yudi-5.10.272-20261101-r16-scsi-noroot.img` | r16 SCSI fix，无 root |
 
 ```sh
 adb reboot bootloader
-fastboot flash boot_a yudi-5.10.272-20261030-r3-ksu.img
+fastboot flash boot_a ~/kernel-sources/work/r16-scsi-images/yudi-5.10.272-20261101-r16-scsi-ksu.img
 fastboot reboot
 ```
 
@@ -83,14 +91,14 @@ fastboot reboot
 
 ## 补丁
 
-补丁在 `patches/`，基线是 `8059ae2`（ACK `android12-5.10-lts`，2026-10-24）。通用补丁按功能分目录
-（`00-platform/`、`01-container/` … `10-sched/`），`series` 决定应用顺序，任意
-前缀都能单独构建；小米组在 `xiaomi/`，用 `series.xiaomi`。按 `series.xiaomi` 顺序应用：
+补丁在 `patches/`，基线是 `8059ae2`（ACK `android12-5.10-lts`，2026-10-24）。`series`
+99 条、`series.xiaomi` 103 条（通用 99 + 小米 4），按功能分目录
+（`00-platform/` … `16-rcu/`），`series` 决定应用顺序。按 `series` 顺序应用：
 
 ```sh
 cd common
 git checkout 8059ae2
-while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series.xiaomi"
+while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series"
 ```
 
 ## KernelSU 模块
@@ -99,21 +107,19 @@ while read p; do git am "$PATCHES/$p"; done < "$PATCHES/series.xiaomi"
 
 | 模块 | 说明 |
 | --- | --- |
-| `yudi-tweaks` 1.8 | 运行时开关和状态页（BBRv3、le9uo、zram、KSM、ADIOS、DAMON、cpuidle governor；1.7 zram 配置，1.8 屏蔽月亮内存模块） |
+| `yudi-tweaks` | 运行时开关和状态页（BBRv3、le9uo、zram、KSM、ADIOS、DAMON、cpuidle governor、RCU 惰性回调） |
 | `ntsync` | 按 `/sys/class/misc/ntsync/dev` 创建 `/dev/ntsync` |
 
 ## 验证
 
-以下为 2026-10-31 r6 的开机与门禁结果；NTSync/futex/epoll 和 CFS/zram 往返是
-2026-10-30 r4 的结果，r5/r6 没有重跑这些用例。详细步骤见 [docs/kernel.md](docs/kernel.md)。
+以下为 2026-11-01 r16 的快速验证结果；NTSync/futex/epoll 和 CFS/zram 往返是
+2026-10-30 r4 的结果，r16 没有重跑这些用例。详细步骤见 [docs/kernel.md](docs/kernel.md)。
 
-- 7298 个导出符号，与 stock 和 r4 的 CRC 差异 0
-- 355 个 `vendor_boot` 模块、315 个 `vendor_dlkm` 模块，CRC 不匹配 0
-- 设备开机 417 个模块，`dmesg` 无 CRC 错误、无 panic/Oops
-- zram 内建，`[lz4kd]`、backing `/dev/block/dm-48`，ExtM/mfz 节点齐全；
-  `freeze-app/memory.anno_writeback_enable=2`
-- mfz 计数实测：测试进程在 `freeze-app` 换出 512MB 后 `mfz_compr_data_size`
-  为 2,871,990 字节；进程退出后回到约 0
+- 7298 个导出符号，缺失 0，CRC 差异 0；670 个 vendor 模块 CRC 不匹配 0
+- 47 项 CONFIG 满足；`cfs_rq` 布局与 stock 一致
+- 设备开机 419 个模块、369 个服务；`dmesg` 无 RCU stall、panic/Oops
+- RCU 开关写 1/0 正常；5000 文件 churn 未见异常；`enable_rcu_lazy` 默认 N
+- 全量 345 个 `call_rcu` 审计完成；当前配置唯一必改的 SCSI EH 已改用 `call_rcu_hurry`
 - NTSync v2 自测 11/11，futex_waitv 7/7，epoll 63/63（r4）
 - CFS 带宽 20% 配额下 `nr_throttled` 正常增长，zram 各算法往返一致（r4）
 

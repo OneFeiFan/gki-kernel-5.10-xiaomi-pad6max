@@ -5,7 +5,7 @@
 2026-10-31 更新：基线已从 `a1eed2e9c` 升到 ACK lts 最新 `8059ae2`；Linux stable
 5.10.273 仍未合入 ACK，安全缺口和本报告的判断不变。
 
-2026-10-31 补充：TEO 和 UCLAMP 实际已在 ACK 5.10 基线里；yudi-tweaks 1.6 增加了
+2026-10-31 补充：TEO 和 UCLAMP 实际已在 ACK 5.10 基线里；yudi-tweaks 2.2 增加了
 TEO 运行时开关，UCLAMP 默认值保持 1024/1024/0，BORE 仍未做。
 
 ## 方法
@@ -83,10 +83,10 @@ yudi 机型、中文社区。子代理只负责找事实和来源，不做取舍
 
 | CVE | 修复 | 本地状态 | 5.10.y |
 | --- | --- | --- | --- |
-| CVE-2026-98984 | dcache：75f4197f1e11，dentry 正在移除时不加挂载点 | 在 0011 里 | **5.10.273 已含**（stable 回移 25e3ce3e2ebd），升级时去掉重复段 |
-| CVE-2026-68448 | overlayfs：a1e0eb8f55cf，copy_file_range 源用 mounter creds 校验 | 在 0011 里 | 没有，继续保留 |
-| CVE-2026-98972 | cpuset：e06b678e3b4e，is_in_v2_mode() 不再读可重建的 root | 在 0011 里 | 没有，继续保留 |
-| CVE-2026-93288 | nfnetlink_log：33d1469b0124，pernet 释放前等 RCU | 在 0011 里 | 没有，继续保留 |
+| CVE-2026-98984 | dcache：75f4197f1e11，dentry 正在移除时不加挂载点 | 在 0013 里 | **5.10.273 已含**（stable 回移 25e3ce3e2ebd），升级时去掉重复段 |
+| CVE-2026-68448 | overlayfs：a1e0eb8f55cf，copy_file_range 源用 mounter creds 校验 | 在 0013 里 | 没有，继续保留 |
+| CVE-2026-98972 | cpuset：e06b678e3b4e，is_in_v2_mode() 不再读可重建的 root | 在 0013 里 | 没有，继续保留 |
+| CVE-2026-93288 | nfnetlink_log：33d1469b0124，pernet 释放前等 RCU | 在 0013 里 | 没有，继续保留 |
 
 rtmutex 的两个 CVE（CVE-2026-43499/53163）基线里已有修复代码，不需要再补。
 
@@ -173,11 +173,11 @@ kernel_patches 有 4.4–5.15 的硬化补丁。结论：没有现成可跟的�
 ## 判断（2026-10-30）
 
 1. 唯一明确该补的是安全同步：基线升到 5.10.273，挑 ACK 上还没进 stable 的安全提交，
-   0011 里的 dcache 段去掉（已进 5.10.273），其余 3 个 CVE 保留；重放 26 个补丁，
+   0013（原 0011）里的 dcache 段去掉（已进 5.10.273），其余 3 个 CVE 保留；重放 26 个补丁，
    跑 KMI/模块/开机/容器/zram 门禁。
 2. MGLRU 不做（理由见上）。
 3. ExtM B 维持不做；ZRAM_MULTI_COMP、EROFS zstd、BORE、Google 新版 BBRv3 不主动做。
-   TEO/UCLAMP 已在基线里：TEO 由 yudi-tweaks 1.6 提供运行时开关，UCLAMP 默认值不改。
+   TEO/UCLAMP 已在基线里：TEO 由 yudi-tweaks 2.2 提供运行时开关，UCLAMP 默认值不改。
 4. 用户 2026-10-30 决定：先归档，不改内核。以后启动时按第 1 条开始。
 
 ## 来源（主要）

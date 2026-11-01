@@ -1,0 +1,278 @@
+From 15050401491c5a5df83dc1dd9ff924f9d18fb538 Mon Sep 17 00:00:00 2001
+From: Juhyung Park <qkrwngud825@gmail.com>
+Date: Thu, 1 Feb 2024 12:47:09 +0900
+Subject: [PATCH] input: misc: add pwrkey-sync software driver
+
+This software driver listens to power button events and performs sync when
+it's held down for long.
+
+This is to minimize data corruption when the system is not responding and
+the user wants to initiate a forced reboot.
+
+Additionally, it can forcefully trigger a kernel panic to help debugging a
+kernel issue further by storing its log to something like pstore before the
+hardware resets itself.
+
+Signed-off-by: Juhyung Park <qkrwngud825@gmail.com>
+---
+ drivers/input/misc/Kconfig       |  58 +++++++++++
+ drivers/input/misc/Makefile      |   1 +
+ drivers/input/misc/pwrkey-sync.c | 172 +++++++++++++++++++++++++++++++
+ 3 files changed, 231 insertions(+)
+ create mode 100644 drivers/input/misc/pwrkey-sync.c
+
+diff --git a/drivers/input/misc/Kconfig b/drivers/input/misc/Kconfig
+index 362e8a019..19ea52b75 100644
+--- a/drivers/input/misc/Kconfig
++++ b/drivers/input/misc/Kconfig
+@@ -869,4 +869,62 @@ config INPUT_STPMIC1_ONKEY
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called stpmic1_onkey.
+ 
++config INPUT_PWRKEY_SYNC
++	tristate "Trigger a sync on power button events"
++	depends on MAGIC_SYSRQ && PM_SLEEP
++	default y
++	help
++	  This software driver listens to power button events and performs
++	  sync when it's held down for long.
++
++	  This is to minimize data corruption when the system is not
++	  responding and the user wants to initiate a forced reboot.
++
++if INPUT_PWRKEY_SYNC
++
++config INPUT_PWRKEY_SYNC_DELAY
++	int "Trigger a sync after this amount of milliseconds"
++	range 100 10000
++	default 2000
++	help
++	  Triggers a sync after user holds down the power button for this
++	  amount of milliseconds.
++
++	  This must be lower than the threshold that the hardware uses for
++	  forced reset.
++
++	  If set too low, this may cause minor slowdowns on normal key
++	  presses.
++
++config INPUT_PWRKEY_SYNC_PANIC
++	bool "Trigger a kernel panic on long power button events"
++	help
++	  If the kernel is in a malfunctioning state, forcefully causing a
++	  kernel panic before the hardware resets itself may help debugging
++	  the issue further by storing its log to something like pstore.
++
++	  Additionally, this feature prints useful info like locks, stack
++	  backtrace and currently blocked tasks to the kernel log before
++	  triggering a kernel panic.
++
++if INPUT_PWRKEY_SYNC_PANIC
++
++config INPUT_PWRKEY_SYNC_PANIC_DELAY
++	int "Trigger a kernel panic after this amount of milliseconds"
++	range 100 20000
++	default 7000
++	help
++	  Triggers a kernel panic after the user holds down the power button
++	  for this amount of milliseconds.
++
++	  This must be lower than the threshold that the hardware uses for
++	  forced reset.
++
++	  If set too low, this may cause minor slowdowns on normal key
++	  presses.
++
++endif # INPUT_PWRKEY_SYNC_PANIC
++
++endif # INPUT_PWRKEY_SYNC
++
+ endif
+diff --git a/drivers/input/misc/Makefile b/drivers/input/misc/Makefile
+index a48e5f2d8..0da679a14 100644
+--- a/drivers/input/misc/Makefile
++++ b/drivers/input/misc/Makefile
+@@ -84,4 +84,5 @@ obj-$(CONFIG_INPUT_WM831X_ON)		+= wm831x-on.o
+ obj-$(CONFIG_INPUT_XEN_KBDDEV_FRONTEND)	+= xen-kbdfront.o
+ obj-$(CONFIG_INPUT_YEALINK)		+= yealink.o
+ obj-$(CONFIG_INPUT_IDEAPAD_SLIDEBAR)	+= ideapad_slidebar.o
++obj-$(CONFIG_INPUT_PWRKEY_SYNC)		+= pwrkey-sync.o
+ 
+diff --git a/drivers/input/misc/pwrkey-sync.c b/drivers/input/misc/pwrkey-sync.c
+new file mode 100644
+index 000000000..961a69f9e
+--- /dev/null
++++ b/drivers/input/misc/pwrkey-sync.c
+@@ -0,0 +1,172 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * pwrkey-sync.c
++ *
++ * Copyright (c) 2024 Juhyung Park
++ *
++ * This software driver listens to power button events and performs sync when
++ * it's held down for long.
++ *
++ * This is to minimize data corruption when the system is not responding and
++ * the user wants to initiate a forced reboot.
++ *
++ * Additionally, it can forcefully trigger a kernel panic to help debugging a
++ * kernel issue further by storing its log to something like pstore before the
++ * hardware resets itself.
++ */
++
++#define pr_fmt(fmt) "pwrkey-sync: " fmt
++
++#include <linux/module.h>
++#include <linux/slab.h>
++#include <linux/delay.h>
++#include <linux/suspend.h>
++#include <linux/sysrq.h>
++#include <linux/input.h>
++
++// Temporarily enable all sysrq
++static void call_sysrq(int key)
++{
++	int mask;
++
++	pr_info("%s: %c\n", __func__, key);
++	mask = sysrq_mask();
++	sysrq_toggle_support(1);
++	handle_sysrq(key);
++	sysrq_toggle_support(mask);
++}
++
++static void pwrkey_sync_work(struct work_struct *unused)
++{
++	pr_info("%s triggered\n", __func__);
++
++	/* Perform an emergency sync and a full sync */
++	call_sysrq('s');
++	msleep(100);
++	ksys_sync_helper();
++}
++
++static void pwrkey_sync_panic_work(struct work_struct *unused)
++{
++	pr_info("%s triggered\n", __func__);
++
++	pwrkey_sync_work(NULL);	// Perform a sync
++	call_sysrq('u');	// Will attempt to remount all mounted filesystems read-only
++	pwrkey_sync_work(NULL);	// Perform a sync again
++
++	// Print useful info
++	call_sysrq('d');	// Shows all locks that are held
++	call_sysrq('l');	// Shows a stack backtrace for all active CPUs
++	call_sysrq('w');	// Will dump a list of current tasks and their information to your console
++
++	// Panic!
++	panic("Power key is held down for " __stringify(CONFIG_INPUT_PWRKEY_SYNC_PANIC_DELAY) "ms");
++}
++
++static DECLARE_DELAYED_WORK(pwrkey_sync_worker, pwrkey_sync_work);
++static DECLARE_DELAYED_WORK(pwrkey_sync_panic_worker, pwrkey_sync_panic_work);
++
++static void pwrkey_sync_input_event(struct input_handle *handle,
++				    unsigned int type, unsigned int code, int value)
++{
++	if (type != EV_KEY)
++		return;
++
++	switch (value) {
++	case 0:
++		/* UP */
++		cancel_delayed_work(&pwrkey_sync_worker);
++#ifdef CONFIG_INPUT_PWRKEY_SYNC_PANIC
++		cancel_delayed_work(&pwrkey_sync_panic_worker);
++#endif
++		break;
++	case 1:
++		/* DOWN */
++		queue_delayed_work(system_highpri_wq, &pwrkey_sync_worker,
++				   msecs_to_jiffies(CONFIG_INPUT_PWRKEY_SYNC_DELAY));
++#ifdef CONFIG_INPUT_PWRKEY_SYNC_PANIC
++		queue_delayed_work(system_highpri_wq, &pwrkey_sync_panic_worker,
++				   msecs_to_jiffies(CONFIG_INPUT_PWRKEY_SYNC_PANIC_DELAY));
++#endif
++		break;
++	}
++}
++
++static int pwrkey_sync_input_connect(struct input_handler *handler,
++				     struct input_dev *dev, const struct input_device_id *id)
++{
++	struct input_handle *handle;
++	int error;
++
++	handle = kzalloc(sizeof(struct input_handle), GFP_KERNEL);
++	if (!handle)
++		return -ENOMEM;
++
++	handle->dev = dev;
++	handle->handler = handler;
++	handle->name = "pwrkey_sync";
++
++	error = input_register_handle(handle);
++	if (error)
++		goto err2;
++
++	error = input_open_device(handle);
++	if (error)
++		goto err1;
++	pr_info("%s found and connected!\n", dev->name);
++	return 0;
++ err1:
++	input_unregister_handle(handle);
++ err2:
++	kfree(handle);
++	return error;
++}
++
++static void pwrkey_sync_input_disconnect(struct input_handle *handle)
++{
++	input_close_device(handle);
++	input_unregister_handle(handle);
++	kfree(handle);
++}
++
++static const struct input_device_id pwrkey_sync_ids[] = {
++	{
++		.flags = INPUT_DEVICE_ID_MATCH_EVBIT | INPUT_DEVICE_ID_MATCH_KEYBIT,
++		.evbit = { BIT_MASK(EV_KEY) },
++		.keybit = { [BIT_WORD(KEY_POWER)] = BIT_MASK(KEY_POWER) },
++	},
++	{},
++};
++
++static struct input_handler pwrkey_sync_input_handler = {
++	.event = pwrkey_sync_input_event,
++	.connect = pwrkey_sync_input_connect,
++	.disconnect = pwrkey_sync_input_disconnect,
++	.name = "pwrkey_sync_handler",
++	.id_table = pwrkey_sync_ids,
++};
++
++static int __init pwrkey_sync_init(void)
++{
++	int ret;
++
++	ret = input_register_handler(&pwrkey_sync_input_handler);
++	if (ret) {
++		pr_err("Failed to register input listener: %d\n", ret);
++		return ret;
++	}
++
++	return 0;
++}
++
++static void __exit pwrkey_sync_exit(void)
++{
++	input_unregister_handler(&pwrkey_sync_input_handler);
++}
++
++module_init(pwrkey_sync_init);
++module_exit(pwrkey_sync_exit);
++
++MODULE_DESCRIPTION("Trigger a sync on power button events");
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Juhyung Park");

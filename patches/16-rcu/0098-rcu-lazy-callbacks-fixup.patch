@@ -1,0 +1,38 @@
+From eb4822a29db82ce471d60c79aa4337ceba9c3d01 Mon Sep 17 00:00:00 2001
+From: "Joel Fernandes (Google)" <joel@joelfernandes.org>
+Date: Tue, 6 Dec 2022 02:55:36 +0000
+Subject: [PATCH 08/12] FIXUP: BACKPORT: FROMGIT: rcu: Make call_rcu() lazy to
+ save power
+
+During the backport, a small update was missed. This causes boot time
+issues with !CONFIG_RCU_LAZY. Fix by adding back the diff.
+
+BUG=b:261328979
+TEST=boot
+
+That should remove the need for go/crrev/c/4080988
+
+Change-Id: Idadb1f6638958d1c5034fae1ba3807e76f737d99
+Signed-off-by: Joel Fernandes <joelaf@google.com>
+Reviewed-on: https://chromium-review.googlesource.com/c/chromiumos/third_party/kernel/+/4080336
+Tested-by: Dan Callaghan <dcallagh@chromium.org>
+Reviewed-by: Dan Callaghan <dcallagh@chromium.org>
+(cherry picked from commit 21e4249ce0466aeb7233ea976da521e5dcaaeeda)
+Signed-off-by: Panchajanya1999 <kernel@panchajanya.dev>
+---
+ kernel/rcu/tree.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 7e6234154..1233f1cd8 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -3099,7 +3099,7 @@ EXPORT_SYMBOL_GPL(call_rcu_flush);
+  */
+ void call_rcu(struct rcu_head *head, rcu_callback_t func)
+ {
+-	return __call_rcu_common(head, func, true);
++	return __call_rcu_common(head, func, IS_ENABLED(CONFIG_RCU_LAZY));
+ }
+ EXPORT_SYMBOL_GPL(call_rcu);
+ 

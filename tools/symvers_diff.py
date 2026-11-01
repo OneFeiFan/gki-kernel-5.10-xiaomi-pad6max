@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""对比基线与新内核的 vmlinux.symvers。
+"""Compare a baseline vmlinux.symvers with a new one.
 
-基线里的每个符号都必须存在且 CRC 相同；新文件多出来的符号只报告，不算失败
-（新增的内建功能可以导出新符号，不影响已有 KMI）。
+Requires every baseline symbol to exist with the same CRC. Extra symbols in
+the new file are reported but do not fail the gate (new built-ins may export
+new symbols without changing existing KMI).
 """
 import sys
 

@@ -1,0 +1,43 @@
+From 93d9400ffc5bb17d1457564fb6df55eeebb3e0a2 Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Sat, 6 Feb 2021 20:17:09 -0800
+Subject: [PATCH] binder: Stub out debug prints by default
+
+Binder code is very hot, so checking frequently to see if a debug
+message should be printed is a waste of cycles. We're not debugging
+binder, so just stub out the debug prints to compile them out entirely.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ drivers/android/binder.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/drivers/android/binder.c b/drivers/android/binder.c
+index db4664405..e0eef5fc4 100644
+--- a/drivers/android/binder.c
++++ b/drivers/android/binder.c
+@@ -136,6 +136,7 @@ static int binder_set_stop_on_user_error(const char *val,
+ module_param_call(stop_on_user_error, binder_set_stop_on_user_error,
+ 	param_get_int, &binder_stop_on_user_error, 0644);
+ 
++#ifdef DEBUG
+ #define binder_debug(mask, x...) \
+ 	do { \
+ 		if (binder_debug_mask & mask) \
+@@ -149,6 +150,16 @@ module_param_call(stop_on_user_error, binder_set_stop_on_user_error,
+ 		if (binder_stop_on_user_error) \
+ 			binder_stop_on_user_error = 2; \
+ 	} while (0)
++#else
++static inline void binder_debug(uint32_t mask, const char *fmt, ...)
++{
++}
++static inline void binder_user_error(const char *fmt, ...)
++{
++	if (binder_stop_on_user_error)
++		binder_stop_on_user_error = 2;
++}
++#endif
+ 
+ #define to_flat_binder_object(hdr) \
+ 	container_of(hdr, struct flat_binder_object, hdr)

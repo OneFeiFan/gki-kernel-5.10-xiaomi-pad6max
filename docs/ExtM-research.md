@@ -3,26 +3,27 @@
 日期：2026-10-29。只读研究，未修改设备。目标：判断小米内存扩展（ExtM）能不能在
 我们的内建 zram 上恢复，以及需要移植什么。
 
-> 2026-10-31 更新：方案 B 已落地为 0027（ExtM）、0028（mfz）和 0029（memcg 文件
-> 注册修复），进入 `p0-series-xiaomi`（29 补丁，树 `2afd8cc8`），r6 实机验证。
-> 下面保留 2026-10-29 的原始调研记录；实测结果见文末「2026-10-31 实测」。
+## 2026-10-31 更新
 
-## PerfInit 反汇编（2026-10-31）
-
-对移植包的 `/system_ext/xbin/system_perf_init` 做了反汇编：
-
-- `writeback_quota` 是日志笔误：代码 `access()` 的是 `/sys/block/zram0/mfz_disk_quota`，失败时
-  打印 "writeback_quota not exist"。PerfInit 从不读写 `writeback_quota`。
-- `zgroup_enable` 是另一套架构的开关（zram 分组 + memcg 级 xswapd 后台换出）。存在时 PerfInit
-  写 `zgroup_enable=1`、`/sys/block/zram0/reset`、`/dev/memcg/memory.xswapd.enable=1`、
-  `memory.xswapd.umrenable=1`；`backing_dev` 与 `zgroup_enable` 都不存在时才打印
-  "This device don't support extm."。miui-services.jar（`checkZgroupEnable`）、libmmperf.so、
-  MiuiMmTrace.o、init.rc 也引用它。无公开源码，不实现，也不能用空文件冒充。
-- mfz：`persist.sys.mfz.enable` 为 false 时 PerfInit 写 `mfz_enable=0`；为 true 时只写
-  `mfz_disk_quota`（`persist.sys.mfz.disk_quota`，默认 2048 MB → 524288 页），`mfz_enable`
-  依赖驱动默认值 1（小米 6.6 源码与官方 yudi zram.ko 均如此），由 `xiaomi/0030` 修正。
-- ExtM 服务的每次写回额度来自 `persist.lm.em.per_flush_quota_{high,medium,low}`（本机 8000 /
-  12000 / 20000）。
+- 打开 `ZRAM_WRITEBACK` 后，PerfInit 已能在内建 zram 上建立写回设备（dm-48），但
+  yudi-tweaks 旧版开机后重置 zram 把它清掉了；1.7 改为改写 `perfinit.conf` 的
+  `comp_algo`，不再重置。
+- 方案 C 的判断有误：开启 MODVERSIONS 时 vermagic 版本号不同并不阻止加载，起作用的
+  是符号 CRC。设备上的 zram.ko / zsmalloc.ko 是移植包带的月亮版
+  （`5.10.237-moon-source`），离线核对：引用的符号全部在 GKI 导出清单里，与官方模块
+  共有的 211 个符号 CRC 全部一致。它提供与官方 yudi 版相同的 ExtM 接口（另有
+  `pp_buckets`），并内置异步 slab 回收线程 kshrink_slabd。
+- 最终没有采用月亮版：作者已停更、模块闭源无法审查，且自带异步 slab 回收等回收改动。
+  改为内建 zram + `xiaomi/0027`：直接取小米官方开源的 ExtM zram（`spinel-v-oss`
+  5.10.233），它已包含本仓库 zram 的全部 ACK 改动。yudi 的 `yudi-t-oss`（5.10.160）里没有
+  ExtM。
+- 内存冻结（mfz）只在小米 6.6 源码里公开：页面写入 zram 时读所属 memcg 的
+  `android_oem_data1` 打标记（保护 / 不限额写回），由 zram 提供的 memcg 文件设置。ACK 5.10 的
+  `struct mem_cgroup` 已有 `ANDROID_OEM_DATA(1)`，移植不需要改结构体（下文"需要加字段"的说法
+  不成立）。设备上 `persist.sys.mfz.enable=true`，`/dev/memcg/freeze-app` 存在，`init.rc` 在
+  `sys.boot_completed=1` 时写 `freeze-app/memory.anno_writeback_enable 1`、
+  `protected-app/memory.anno_writeback_protected 1`、`protected-app/memory.anno_writeback_control 1`、
+  `mimd/critical1/memory.anno_writeback_protected 1`，因此已移植为 `xiaomi/0028`。
 
 ## 结论
 
@@ -69,7 +70,7 @@
 | --- | --- | --- | --- |
 | A | 只开 `CONFIG_ZRAM_WRITEBACK`，观察 PerfInit 是否还跳过 ExtM | 0.5 天 | 低；新增 sysfs，不新增导出符号 |
 | B | 移植 spinel 5.10.233 的 ExtM 核心 + 从 6.6 回移 mfz 子集 | 核心 3-7 天 | 高；zram 数据路径、`mem_cgroup` 内部字段、启动顺序、lz4kd 冲突 |
-| C | 直接用厂商 zram.ko | — | 不可行：vermagic 和 MODVERSIONS 不匹配，`CONFIG_MODULE_FORCE_LOAD` 未开 |
+| C | 直接用厂商 zram.ko | 0 | 不采用：移植包里的是第三方闭源构建，作者停更 |
 | D | 维持现状（只压缩 swap） | 0 | 零；ExtM 不工作，每秒一条 logcat warning |
 
 A 的判别逻辑：刷入后在下次启动的 PerfInit 日志里看是否还有
@@ -78,7 +79,7 @@ B；还有 → 门槛在 health_desc/时序/权限，先修启动侧，内核补
 
 ## 本次发布带上的探针
 
-0024 已加 `CONFIG_ZRAM_WRITEBACK=y`，作为 A 探针随本次内核一起发布。启动后看：
+（历史）当时的 0017（现 `optional/0017`）加了 `CONFIG_ZRAM_WRITEBACK=y`，作为 A 探针随本次内核一起发布。启动后看：
 
 ```sh
 ls /sys/block/zram0 | grep -E 'backing_dev|writeback|bd_stat'
@@ -110,26 +111,3 @@ cat /sys/block/zram0/comp_algorithm     # 仍应为 [lz4kd]
 - 本地：`/vendor_dlkm/lib/modules/zram.ko`、`/system_ext/xbin/system_perf_init`、
   `/system_ext/framework/miui-services.jar`
 - 启动日志：`/data/adb/ksu/log/logcat.log`
-
-## 2026-10-31 实测
-
-- zram 内建，`/sys/block/zram0` 出现 `backing_dev`、`bd_stat`、`mfz_*`；
-  `comp_algorithm` 为 `[lz4kd]`，`backing_dev` 为 `/dev/block/dm-48`。
-- `freeze-app/memory.anno_writeback_enable=2`（init.rc 写 1，驱动按 5.10 接口存 2）；
-  `mfz_enable=0`、`mfz_disk_quota=524288`。
-- mfz 计数：把测试进程放进 `freeze-app`，`MADV_PAGEOUT` 换出 512MB 后
-  `mfz_compr_data_size=2,871,990` 字节；进程退出后回到约 0。
-- 冻结器现状（2026-10-31 实测）：内核的 v1 freezer 和 v2 冻结都可用。进程都在 cgroup v2
-  的分组里（system_server 在 `/system/uid_1000/pid_*`，应用在 `/apps/uid_*/pid_*`）；v2 只
-  列出 pids 控制器是正常的（cpu、cpuset、memory、blkio 挂在 v1，其余是 v1 专用控制器），
-  v2 冻结是内核核心功能，不需要控制器。新建组写 `cgroup.freeze` 实测 `cgroup.events` 显示
-  `frozen 1`，解冻后 `frozen 0`。系统 API 冻结器的 `Freezer disabled` 来自 ROM 默认设置：
-  `cached_apps_freezer` 为 `disabled`（`dumpsys settings`：`pkg:android value:disabled
-  default:disabled defaultSystemSet:true`），`use_freezer` 设备配置为空，日志里没有
-  `Checking cgroup freezer`，系统没有走到检测内核能力那一步；澎湃 OS 用自己的 Millet
-  冻结链路。v1 freezer ROM 不挂载，第三方墓碑在自己的挂载命名空间里挂（如
-  `/sys/fs/cgroup/freezer/perf/frozen`）。第三方冻结（v1 或 v2）不会把进程搬进
-  `/dev/memcg/freeze-app`，所以 mfz 只在小米自己的冻结链路下生效。Millet 的
-  `persist.sys.millet.cgroup=true` 会 tmpfs 覆盖 `/sys/fs/cgroup`，与 Android 16 的分组
-  布局冲突，运行中开启会导致系统服务崩溃，不要直接开。
-- 测试用的挂载和脚本已移除，未进入模块。
